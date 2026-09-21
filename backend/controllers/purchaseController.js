@@ -1,0 +1,2464 @@
+// import { logActivity } from '../utils/activityLogger.js';
+// import { createNotification, checkStockAlerts } from '../services/notificationService.js';
+// import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
+
+// const parseToISODate = (val) => {
+//   if (!val || val === 'N/A' || val === 'null' || val === 'undefined' || val === '0000-00-00') return null;
+//   const str = String(val).trim();
+//   if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+//     return str.substring(0, 10);
+//   }
+//   if (/^\d{2}[-/]\d{2}[-/]\d{4}/.test(str)) {
+//     const parts = str.split(/[-/]/);
+//     return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+//   }
+//   const d = new Date(str);
+//   return (!isNaN(d.getTime()) && d.getFullYear() > 2000) ? d.toISOString().substring(0, 10) : null;
+// };
+
+// // @desc    Get all purchases for tenant
+// // @route   GET /api/purchases
+// // @access  Private
+// export const getPurchases = async (req, res, next) => {
+//   try {
+//     const { search, vendorId, vendor_id, paymentStatus, page = 1, limit = 50 } = req.query;
+//     const offset = (Number(page) - 1) * Number(limit);
+
+//     let query = `
+//       SELECT p.*, v.name as vendor_name, w.name as warehouse_name
+//       FROM purchases p
+//       LEFT JOIN vendors v ON p.vendor_id = v.id
+//       LEFT JOIN warehouses w ON p.warehouse_id = w.id
+//       WHERE 1=1
+//     `;
+//     const queryParams = [];
+
+//     if (search) {
+//       query += ' AND (p.purchase_no LIKE ? OR v.name LIKE ?)';
+//       const searchVal = `%${search}%`;
+//       queryParams.push(searchVal, searchVal);
+//     }
+
+//     const targetVendorId = vendorId || vendor_id;
+//     if (targetVendorId) {
+//       query += ' AND p.vendor_id = ?';
+//       queryParams.push(targetVendorId);
+//     }
+
+//     if (paymentStatus && paymentStatus !== 'all') {
+//       query += ' AND p.payment_status = ?';
+//       queryParams.push(paymentStatus);
+//     }
+
+//     query += ' ORDER BY p.date DESC, p.created_at DESC LIMIT ? OFFSET ?';
+//     queryParams.push(Number(limit), Number(offset));
+
+//     const [purchases] = await req.db.query(query, queryParams);
+//     const mappedPurchases = purchases.map(p => {
+//       const tot = Number(p.total || 0);
+//       const paid = Number(p.paid_amount || 0);
+//       let status = p.payment_status || 'Pending';
+//       if (paid >= tot && tot > 0) {
+//         status = 'Paid';
+//       } else if (paid > 0) {
+//         status = 'Partial';
+//       } else {
+//         status = 'Pending';
+//       }
+//       return {
+//         ...p,
+//         paid_amount: paid,
+//         payment_status: status
+//       };
+//     });
+
+//     return res.status(200).json({ success: true, count: mappedPurchases.length, purchases: mappedPurchases });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// // @desc    Get single purchase detail
+// // @route   GET /api/purchases/:id
+// // @access  Private
+// export const getPurchaseById = async (req, res, next) => {
+//   try {
+//     const { id } = req.params;
+
+//     const [purchases] = await req.db.query(`
+//       SELECT p.*, v.name as vendor_name, v.phone as vendor_phone, v.email as vendor_email, 
+//              v.address as vendor_address, v.gstin as vendor_gstin,
+//              w.name as warehouse_name
+//       FROM purchases p
+//       LEFT JOIN vendors v ON p.vendor_id = v.id
+//       LEFT JOIN warehouses w ON p.warehouse_id = w.id
+//       WHERE p.id = ?
+//     `, [id]);
+
+//     if (purchases.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Purchase record not found' });
+//     }
+
+//     const purchase = purchases[0];
+
+//     // Fetch items with already returned quantities
+//     const [items] = await req.db.query(`
+//       SELECT pi.*, pr.name as product_name, pr.unit,
+//              COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id), 0) as returnedQuantity
+//       FROM purchase_items pi
+//       JOIN products pr ON pi.product_id = pr.id
+//       WHERE pi.purchase_id = ?
+//     `, [id]);
+
+//     purchase.items = items;
+
+//     return res.status(200).json({ success: true, purchase });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// // @desc    Create new purchase invoice (Stock In)
+// // @route   POST /api/purchases
+// // @access  Private
+// export const createPurchase = async (req, res, next) => {
+//   const connection = await req.db.getConnection();
+//   try {
+//     await connection.beginTransaction();
+
+//     const {
+//       vendor_id,
+//       warehouse_id,
+//       date,
+//       subtotal,
+//       discount,
+//       gst_amount,
+//       total,
+//       payment_status,
+//       delivery_status,
+//       payment_method,
+//       items,
+//       purchase_order_id,
+//       grn_id
+//     } = req.body;
+
+//     if (!vendor_id || !warehouse_id || !date || !items || items.length === 0) {
+//       return res.status(400).json({ success: false, message: 'Missing purchase header details or products list' });
+//     }
+
+//     // 15-Second Duplicate Submission Guard (prevents rapid double-clicks from creating duplicate purchases)
+//     const [recentDup] = await connection.query(`
+//       SELECT id, purchase_no 
+//       FROM purchases 
+//       WHERE vendor_id = ? AND total = ? AND DATE(date) = DATE(?) AND created_at >= DATE_SUB(NOW(), INTERVAL 15 SECOND)
+//       LIMIT 1
+//     `, [vendor_id, total || 0, date]);
+
+//     if (recentDup.length > 0) {
+//       await connection.rollback();
+//       connection.release();
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Purchase invoice created successfully (duplicate submission suppressed)',
+//         purchaseNo: recentDup[0].purchase_no,
+//         purchaseId: recentDup[0].id
+//       });
+//     }
+
+//     // Generate tenant purchase invoice number safely (collision free)
+//     const year = new Date(date).getFullYear();
+//     const [allPurchases] = await connection.query('SELECT purchase_no FROM purchases WHERE purchase_no LIKE ?', [`PUR-%-${year}`]);
+//     let maxSeq = 0;
+//     for (const row of allPurchases) {
+//       const parts = row.purchase_no.split('-');
+//       const seq = parseInt(parts[1], 10);
+//       if (!isNaN(seq) && seq > maxSeq) {
+//         maxSeq = seq;
+//       }
+//     }
+//     const purchaseNo = `PUR-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+//     // Calculate payment status and paid amount
+//     const invoiceTotal = Number(total || 0);
+//     let actualPaymentStatus = payment_status || 'Pending';
+//     let initialPaid = Number(req.body.paid_amount || 0);
+
+//     if (actualPaymentStatus === 'Paid' && initialPaid === 0) {
+//       initialPaid = invoiceTotal;
+//     } else if (actualPaymentStatus === 'Partial' && initialPaid === 0) {
+//       initialPaid = invoiceTotal / 2;
+//     }
+
+//     if (initialPaid >= invoiceTotal && invoiceTotal > 0) {
+//       actualPaymentStatus = 'Paid';
+//     } else if (initialPaid > 0) {
+//       actualPaymentStatus = 'Partial';
+//     } else {
+//       actualPaymentStatus = 'Pending';
+//       initialPaid = 0;
+//     }
+
+//     // Insert Purchase
+//     const [result] = await connection.query(
+//       `INSERT INTO purchases (purchase_no, vendor_id, warehouse_id, date, subtotal, discount, gst_amount, total, paid_amount, payment_status, delivery_status, payment_method, purchase_order_id, grn_id)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       [
+//         purchaseNo, vendor_id, warehouse_id, date, 
+//         subtotal || 0, discount || 0, gst_amount || 0, invoiceTotal, initialPaid,
+//         actualPaymentStatus, delivery_status || 'Received', payment_method || 'Cash',
+//         purchase_order_id || null, grn_id || null
+//       ]
+//     );
+
+//     const purchaseId = result.insertId;
+//     const isLinkedToReceipt = !!grn_id || !!purchase_order_id;
+
+//     // Loop items to save & update stock
+//     for (const item of items) {
+//       const itemMrp = Number(item.mrp || item.max_retail_price || 0);
+//       const itemSellingPrice = Number(item.selling_price || item.price || 0);
+
+//       await connection.query(
+//         `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
+//          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+//         [purchaseId, item.product_id, item.quantity, item.purchase_price, itemMrp, item.gst, item.total]
+//       );
+
+//       if (!isLinkedToReceipt) {
+//         // Create batch record in purchase_batches for FIFO tracking
+//         await connection.query(
+//           `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, purchase_id)
+//            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//           [
+//             item.product_id,
+//             item.batch_number || item.batch_no || `BATCH-${Date.now()}`,
+//             item.quantity,
+//             item.quantity,
+//             date,
+//             parseToISODate(item.expiry_date || item.expDate),
+//             item.purchase_price || 0,
+//             itemMrp,
+//             itemSellingPrice,
+//             vendor_id,
+//             warehouse_id,
+//             purchaseId
+//           ]
+//         );
+
+//         // Increment stock in stock table per product + warehouse
+//         const [existingStock] = await connection.query(
+//           'SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1',
+//           [item.product_id, warehouse_id]
+//         );
+
+//         let prevQty = 0;
+//         if (existingStock.length > 0) {
+//           prevQty = Number(existingStock[0].quantity);
+//           await connection.query(
+//             'UPDATE stock SET quantity = quantity + ? WHERE id = ?',
+//             [item.quantity, existingStock[0].id]
+//           );
+//         } else {
+//           await connection.query(
+//             'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
+//             [item.product_id, warehouse_id, item.quantity]
+//           );
+//         }
+
+//         // Log Stock movement per vendor
+//         await connection.query(
+//           `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+//            VALUES (?, ?, ?, 'Stock In', ?, ?, ?, ?, ?, ?)`,
+//           [item.product_id, warehouse_id, vendor_id, item.quantity, purchaseNo, 'Purchase Invoice Entry', req.user.id, prevQty, prevQty + item.quantity]
+//         );
+
+//         // Sync FIFO active batch Expiry Date and MRP on Product master
+//         await syncProductFifoState(connection, item.product_id);
+//       }
+//     }
+
+//     // Update Vendor totals & outstanding balance
+//     await connection.query(
+//       `UPDATE vendors 
+//        SET total_purchases = COALESCE(total_purchases, 0) + ?,
+//            total_paid = COALESCE(total_paid, 0) + ?
+//        WHERE id = ?`,
+//       [invoiceTotal, initialPaid, vendor_id]
+//     );
+
+//     // Fetch updated vendor totals & calculate outstanding balance
+//     const [vRow] = await connection.query('SELECT total_purchases, total_paid, opening_balance FROM vendors WHERE id = ?', [vendor_id]);
+//     if (vRow.length > 0) {
+//       const totP = Number(vRow[0].total_purchases || 0);
+//       const totPaid = Number(vRow[0].total_paid || 0);
+//       const openBal = Number(vRow[0].opening_balance || 0);
+//       const newBal = Math.max(0, (totP + openBal) - totPaid);
+
+//       await connection.query('UPDATE vendors SET outstanding_balance = ? WHERE id = ?', [newBal, vendor_id]);
+
+//       // Save Purchase Invoice entry in vendor_ledger
+//       await connection.query(
+//         `INSERT INTO vendor_ledger 
+//           (vendor_id, purchase_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+//          VALUES (?, ?, ?, 'PURCHASE_INVOICE', ?, ?, ?, 0.00, ?)`,
+//         [
+//           vendor_id,
+//           purchaseId,
+//           date || new Date(),
+//           purchaseNo,
+//           `Purchase Invoice ${purchaseNo}`,
+//           invoiceTotal,
+//           newBal
+//         ]
+//       );
+//     }
+
+//     await connection.commit();
+
+//     await logActivity(req.user.id, 'Create Purchase', 'Purchases', `Recorded purchase invoice "${purchaseNo}" (Vendor ID: ${vendor_id})`, req.ip);
+
+//     const [vInfo] = await connection.query('SELECT name FROM vendors WHERE id = ?', [vendor_id]);
+//     const vendorName = vInfo[0]?.name || 'Unknown Vendor';
+
+//     await createNotification({
+//       type: 'Purchase Invoice',
+//       title: 'New Purchase Recorded',
+//       message: `Purchase invoice "${purchaseNo}" recorded from supplier "${vendorName}" for total amount ₹${total}.`,
+//       priority: 'Medium',
+//       related_user: req.user.email,
+//       related_module: 'Purchases',
+//       target_roles: 'Admin,Manager'
+//     }, connection);
+
+//     for (const item of items) {
+//       await checkStockAlerts(connection, item.product_id, req.user.id);
+//     }
+
+//     return res.status(201).json({
+//       success: true,
+//       message: 'Purchase invoice created successfully',
+//       purchaseNo,
+//       purchaseId
+//     });
+//   } catch (error) {
+//     await connection.rollback();
+//     next(error);
+//   } finally {
+//     connection.release();
+//   }
+// };
+
+// // @desc    Delete purchase order (reverts stocks)
+// // @route   DELETE /api/purchases/:id
+// // @access  Private
+// export const deletePurchase = async (req, res, next) => {
+//   const connection = await req.db.getConnection();
+//   try {
+//     await connection.beginTransaction();
+
+//     const { id } = req.params;
+
+//     // Check purchase details including vendor_id and payment details
+//     const [purchases] = await connection.query('SELECT purchase_no, warehouse_id, vendor_id, total, payment_status, purchase_order_id, grn_id FROM purchases WHERE id = ?', [id]);
+//     if (purchases.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Purchase record not found' });
+//     }
+
+//     const { purchase_no, warehouse_id, vendor_id, total, payment_status, purchase_order_id, grn_id } = purchases[0];
+//     const isLinkedToReceipt = !!grn_id;
+
+//     // Fetch items
+//     const [items] = await connection.query('SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?', [id]);
+
+//     // Reverse outstanding balance on deletion
+//     let unpaidAmount = 0;
+//     if (payment_status === 'Pending') {
+//       unpaidAmount = Number(total);
+//     } else if (payment_status === 'Partial') {
+//       const paidAmount = purchases[0].paid_amount || (Number(total) / 2);
+//       unpaidAmount = Math.max(0, Number(total) - paidAmount);
+//     }
+
+//     if (unpaidAmount > 0) {
+//       await connection.query(
+//         'UPDATE vendors SET outstanding_balance = GREATEST(0, outstanding_balance - ?) WHERE id = ?',
+//         [unpaidAmount, vendor_id]
+//       );
+//     }
+
+//     // Reverse stocks (only if NOT linked to PO/GRN, since stock was managed by GRN)
+//     if (!isLinkedToReceipt) {
+//       for (const item of items) {
+//         const [currentStock] = await connection.query(
+//           'SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? AND vendor_id = ?',
+//           [item.product_id, warehouse_id, vendor_id]
+//         );
+
+//         const stockQty = currentStock.length > 0 ? currentStock[0].quantity : 0;
+//         const finalQty = Math.max(0, stockQty - item.quantity);
+
+//         await connection.query(
+//           'UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ? AND vendor_id = ?',
+//           [finalQty, item.product_id, warehouse_id, vendor_id]
+//         );
+
+//         // Log reverse stock log
+//         await connection.query(
+//           `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id)
+//            VALUES (?, ?, ?, 'Stock Out', ?, ?, ?, ?)`,
+//           [item.product_id, warehouse_id, vendor_id, -item.quantity, purchase_no, 'Purchase Invoice Cancelled', req.user.id]
+//         );
+//       }
+//     }
+
+//     // Delete items and invoice
+//     await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+//     await connection.query('DELETE FROM purchases WHERE id = ?', [id]);
+
+//     await connection.commit();
+
+//     await logActivity(req.user.id, 'Cancel Purchase', 'Purchases', `Cancelled purchase invoice "${purchase_no}" (ID: ${id})`, req.ip);
+
+//     return res.status(200).json({ success: true, message: 'Purchase invoice deleted successfully' });
+//   } catch (error) {
+//     await connection.rollback();
+//     next(error);
+//   } finally {
+//     connection.release();
+//   }
+// };
+
+// // ==========================================
+// // PURCHASE ORDERS CONTROLLERS
+// // ==========================================
+
+// // @desc    Get all purchase orders
+// // @route   GET /api/purchases/orders
+// // @access  Private
+// export const getPurchaseOrders = async (req, res, next) => {
+//   try {
+//     const { search, vendorId, status, page = 1, limit = 50 } = req.query;
+//     const offset = (Number(page) - 1) * Number(limit);
+
+//     let query = `
+//       SELECT po.*, v.name as vendor_name, w.name as warehouse_name
+//       FROM purchase_orders po
+//       LEFT JOIN vendors v ON po.vendor_id = v.id
+//       LEFT JOIN warehouses w ON po.warehouse_id = w.id
+//       WHERE 1=1
+//     `;
+//     const queryParams = [];
+
+//     if (search) {
+//       query += ' AND (po.purchase_order_no LIKE ? OR v.name LIKE ?)';
+//       const searchVal = `%${search}%`;
+//       queryParams.push(searchVal, searchVal);
+//     }
+
+//     if (vendorId) {
+//       query += ' AND po.vendor_id = ?';
+//       queryParams.push(vendorId);
+//     }
+
+//     if (status && status !== 'all') {
+//       query += ' AND po.status = ?';
+//       queryParams.push(status);
+//     }
+
+//     query += ' ORDER BY po.date DESC, po.created_at DESC LIMIT ? OFFSET ?';
+//     queryParams.push(Number(limit), Number(offset));
+
+//     const [orders] = await req.db.query(query, queryParams);
+//     return res.status(200).json({ success: true, count: orders.length, purchaseOrders: orders });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// // @desc    Get single purchase order detail
+// // @route   GET /api/purchases/orders/:id
+// // @access  Private
+// export const getPurchaseOrderById = async (req, res, next) => {
+//   try {
+//     const { id } = req.params;
+
+//     const [orders] = await req.db.query(`
+//       SELECT po.*, v.name as vendor_name, v.phone as vendor_phone, v.email as vendor_email, 
+//              v.address as vendor_address, v.gstin as vendor_gstin,
+//              w.name as warehouse_name, COALESCE(u.name, 'Admin') as prepared_by
+//       FROM purchase_orders po
+//       LEFT JOIN vendors v ON po.vendor_id = v.id
+//       LEFT JOIN warehouses w ON po.warehouse_id = w.id
+//       LEFT JOIN users u ON po.user_id = u.id
+//       WHERE po.id = ?
+//     `, [id]);
+
+//     if (orders.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Purchase order not found' });
+//     }
+
+//     const order = orders[0];
+
+//     // Fetch items
+//     const [items] = await req.db.query(`
+//       SELECT poi.*, pr.name as product_name, pr.unit, pr.barcode, cat.name as category
+//       FROM purchase_order_items poi
+//       JOIN products pr ON poi.product_id = pr.id
+//       LEFT JOIN categories cat ON pr.category_id = cat.id
+//       WHERE poi.purchase_order_id = ?
+//     `, [id]);
+
+//     order.items = items;
+
+//     // Fetch linked GRNs
+//     const [grns] = await req.db.query(
+//       'SELECT id, grn_no, date, created_at FROM grns WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+//       [id]
+//     );
+//     order.grns = grns;
+
+//     // Fetch linked Invoices
+//     const [invoices] = await req.db.query(
+//       'SELECT id, purchase_no, date, total, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+//       [id]
+//     );
+//     order.invoices = invoices;
+
+//     return res.status(200).json({ success: true, order });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// // @desc    Create new purchase order
+// // @route   POST /api/purchases/orders
+// // @access  Private
+// export const createPurchaseOrder = async (req, res, next) => {
+//   const connection = await req.db.getConnection();
+//   try {
+//     await connection.beginTransaction();
+
+//     const {
+//       vendor_id,
+//       warehouse_id,
+//       date,
+//       expected_delivery_date,
+//       subtotal,
+//       discount,
+//       gst_amount,
+//       total,
+//       notes,
+//       items
+//     } = req.body;
+
+//     if (!vendor_id || !warehouse_id || !date || !items || items.length === 0) {
+//       return res.status(400).json({ success: false, message: 'Missing purchase order header details or products list' });
+//     }
+
+//     const year = new Date(date).getFullYear();
+//     const [allPOs] = await connection.query('SELECT purchase_order_no FROM purchase_orders WHERE purchase_order_no LIKE ?', [`PO-%-${year}`]);
+//     let maxSeq = 0;
+//     for (const row of allPOs) {
+//       if (row.purchase_order_no) {
+//         const parts = row.purchase_order_no.split('-');
+//         const seq = parseInt(parts[1], 10);
+//         if (!isNaN(seq) && seq > maxSeq) {
+//           maxSeq = seq;
+//         }
+//       }
+//     }
+//     const poNo = `PO-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+//     // Insert PO (including user_id for tracking Prepared By metadata)
+//     const [result] = await connection.query(
+//       `INSERT INTO purchase_orders (purchase_order_no, vendor_id, warehouse_id, date, expected_delivery_date, subtotal, discount, gst_amount, total, status, notes, user_id)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+//       [poNo, vendor_id, warehouse_id, date, expected_delivery_date || null, subtotal || 0, discount || 0, gst_amount || 0, total || 0, notes || null, req.user.id]
+//     );
+
+//     const poId = result.insertId;
+
+//     // Loop items
+//     for (const item of items) {
+//       await connection.query(
+//         `INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, received_quantity, purchase_price, gst, total)
+//          VALUES (?, ?, ?, 0, ?, ?, ?)`,
+//         [poId, item.product_id, item.quantity, item.purchase_price, item.gst, item.total]
+//       );
+//     }
+
+//     await connection.commit();
+//     await logActivity(req.user.id, 'Create Purchase Order', 'Purchases', `Created Purchase Order "${poNo}" (Vendor ID: ${vendor_id})`, req.ip);
+
+//     return res.status(201).json({
+//       success: true,
+//       message: 'Purchase order created successfully',
+//       purchaseOrderNo: poNo,
+//       purchaseOrderId: poId
+//     });
+//   } catch (error) {
+//     await connection.rollback();
+//     next(error);
+//   } finally {
+//     connection.release();
+//   }
+// };
+
+// // @desc    Update purchase order status
+// // @route   PUT /api/purchases/orders/:id/status
+// // @access  Private
+// export const updatePurchaseOrderStatus = async (req, res, next) => {
+//   try {
+//     const { id } = req.params;
+//     const { status } = req.body;
+
+//     if (!status) {
+//       return res.status(400).json({ success: false, message: 'Status field is required' });
+//     }
+
+//     const [po] = await req.db.query('SELECT purchase_order_no FROM purchase_orders WHERE id = ?', [id]);
+//     if (po.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Purchase order not found' });
+//     }
+
+//     await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [status, id]);
+//     await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Updated Purchase Order "${po[0].purchase_order_no}" status to "${status}"`, req.ip);
+
+//     return res.status(200).json({ success: true, message: 'Purchase order status updated successfully' });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// // @desc    Delete purchase order
+// // @route   DELETE /api/purchases/orders/:id
+// // @access  Private
+// export const deletePurchaseOrder = async (req, res, next) => {
+//   const connection = await req.db.getConnection();
+//   try {
+//     await connection.beginTransaction();
+//     const { id } = req.params;
+
+//     const [po] = await connection.query('SELECT purchase_order_no, status FROM purchase_orders WHERE id = ?', [id]);
+//     if (po.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Purchase order not found' });
+//     }
+
+//     if (!['Draft', 'Cancelled'].includes(po[0].status)) {
+//       return res.status(400).json({ success: false, message: 'Cannot delete a purchase order that is confirmed, received, or completed. Cancel it first.' });
+//     }
+
+//     // Delete items and order
+//     await connection.query('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [id]);
+//     await connection.query('DELETE FROM purchase_orders WHERE id = ?', [id]);
+
+//     await connection.commit();
+//     await logActivity(req.user.id, 'Delete Purchase Order', 'Purchases', `Deleted Purchase Order "${po[0].purchase_order_no}"`, req.ip);
+
+//     return res.status(200).json({ success: true, message: 'Purchase order deleted successfully' });
+//   } catch (error) {
+//     await connection.rollback();
+//     next(error);
+//   } finally {
+//     connection.release();
+//   }
+// };
+
+// // ==========================================
+// // GRN CONTROLLERS
+// // ==========================================
+
+// // @desc    Create GRN (Goods Received Note) and adjust stock levels
+// // @route   POST /api/purchases/orders/:id/grn
+// // @access  Private
+// export const createGRN = async (req, res, next) => {
+//   const connection = await req.db.getConnection();
+//   try {
+//     await connection.beginTransaction();
+
+//     const { id: poId } = req.params;
+//     const { date, notes, items } = req.body;
+
+//     if (!date || !items || items.length === 0) {
+//       return res.status(400).json({ success: false, message: 'Missing GRN details or products list' });
+//     }
+
+//     // Get PO details
+//     const [orders] = await connection.query('SELECT purchase_order_no, vendor_id, warehouse_id FROM purchase_orders WHERE id = ?', [poId]);
+//     if (orders.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Linked Purchase Order not found' });
+//     }
+
+//     const { purchase_order_no, vendor_id, warehouse_id } = orders[0];
+
+//     // Generate GRN number
+//     const year = new Date(date).getFullYear();
+//     const [allGRNs] = await connection.query('SELECT grn_no FROM grns WHERE grn_no LIKE ?', [`GRN-%-${year}`]);
+//     let maxSeq = 0;
+//     for (const row of allGRNs) {
+//       if (row.grn_no) {
+//         const parts = row.grn_no.split('-');
+//         const seq = parseInt(parts[1], 10);
+//         if (!isNaN(seq) && seq > maxSeq) {
+//           maxSeq = seq;
+//         }
+//       }
+//     }
+//     const grnNo = `GRN-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+//     // Insert GRN
+//     const [grnResult] = await connection.query(
+//       `INSERT INTO grns (grn_no, purchase_order_id, vendor_id, warehouse_id, date, notes)
+//        VALUES (?, ?, ?, ?, ?, ?)`,
+//       [grnNo, poId, vendor_id, warehouse_id, date, notes || null]
+//     );
+
+//     const grnId = grnResult.insertId;
+
+//     // Fetch PO items
+//     const [poItems] = await connection.query('SELECT id, product_id, quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+
+//     // Process items, increment stock, add stock logs, update PO received quantities
+//     for (const item of items) {
+//       const targetProdId = item.product_id || item.productId || item.id;
+//       const poItem = poItems.find(p => String(p.product_id) === String(targetProdId) || String(p.id) === String(item.id));
+//       const productId = poItem ? poItem.product_id : targetProdId;
+//       if (!productId) continue;
+
+//       const qtyRec = Number(item.quantity_received || 0);
+//       const qtyDam = Number(item.quantity_damaged || 0);
+//       const qtyRej = Number(item.quantity_rejected || 0);
+//       const formattedExpiry = parseToISODate(item.expiry_date);
+
+//       // Insert grn item
+//       await connection.query(
+//         `INSERT INTO grn_items (grn_id, product_id, quantity_received, quantity_damaged, quantity_rejected, batch_number, mrp, expiry_date)
+//          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+//         [grnId, productId, qtyRec, qtyDam, qtyRej, item.batch_number || null, item.mrp ? Number(item.mrp) : null, formattedExpiry]
+//       );
+
+//       if (formattedExpiry) {
+//         const [fifoGrn] = await connection.query(
+//           `SELECT expiry_date FROM grn_items 
+//            WHERE product_id = ? AND expiry_date IS NOT NULL AND expiry_date != '' AND expiry_date != 'N/A'
+//            ORDER BY id DESC LIMIT 1`,
+//           [productId]
+//         );
+//         const fifoDate = fifoGrn.length > 0 ? fifoGrn[0].expiry_date : formattedExpiry;
+//         await connection.query(
+//           'UPDATE products SET expiry_date = ? WHERE id = ?',
+//           [fifoDate, productId]
+//         );
+//       }
+
+//       if (item.mrp && Number(item.mrp) > 0) {
+//         const [fifoGrnMrp] = await connection.query(
+//           `SELECT mrp FROM grn_items 
+//            WHERE product_id = ? AND mrp IS NOT NULL AND mrp > 0
+//            ORDER BY id DESC LIMIT 1`,
+//           [productId]
+//         );
+//         const fifoMrp = fifoGrnMrp.length > 0 ? Number(fifoGrnMrp[0].mrp) : Number(item.mrp);
+//         await connection.query(
+//           'UPDATE products SET mrp = ? WHERE id = ?',
+//           [fifoMrp, productId]
+//         );
+//       }
+
+//         if (qtyRec > 0) {
+//           const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [productId]);
+//           const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
+//           const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
+
+//           const itemMrp = item.mrp && Number(item.mrp) > 0 ? Number(item.mrp) : (item.max_retail_price && Number(item.max_retail_price) > 0 ? Number(item.max_retail_price) : defaultProdMrp);
+//           const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : (item.price && Number(item.price) > 0 ? Number(item.price) : defaultProdSellingPrice);
+
+//           // Create dedicated batch record in purchase_batches for FIFO inventory management
+//           await connection.query(
+//             `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, grn_id)
+//              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//             [productId, item.batch_number || `BATCH-${Date.now()}`, qtyRec, qtyRec, date, formattedExpiry, item.unit_price || 0, itemMrp, itemSellingPrice, vendor_id, warehouse_id, grnId]
+//           );
+
+//           // Update PO item received quantity
+//           if (poItem) {
+//             await connection.query(
+//               'UPDATE purchase_order_items SET received_quantity = received_quantity + ? WHERE id = ?',
+//               [qtyRec, poItem.id]
+//             );
+//           }
+
+//           // Update Stock levels
+//           const [existingStock] = await connection.query(
+//             'SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1',
+//             [productId, warehouse_id]
+//           );
+
+//           let prevQty = 0;
+//           if (existingStock.length > 0) {
+//             prevQty = Number(existingStock[0].quantity);
+//             await connection.query(
+//               'UPDATE stock SET quantity = quantity + ? WHERE id = ?',
+//               [qtyRec, existingStock[0].id]
+//             );
+//           } else {
+//             await connection.query(
+//               'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
+//               [productId, warehouse_id, qtyRec]
+//             );
+//           }
+
+//           // Sync FIFO active batch Expiry Date and MRP on Product master
+//           await syncProductFifoState(connection, productId);
+//         }
+
+//         // Log Stock movement
+//         await connection.query(
+//           `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+//            VALUES (?, ?, ?, 'Stock In', ?, ?, ?, ?, ?, ?)`,
+//           [productId, warehouse_id, vendor_id, qtyRec, grnNo, `Goods Received (PO: ${purchase_order_no})`, req.user.id, prevQty, prevQty + qtyRec]
+//         );
+//       }
+//     }
+
+//     // Update PO Status based on quantities
+//     const [updatedPOItems] = await connection.query('SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+//     let allReceived = true;
+//     let anyReceived = false;
+
+//     for (const it of updatedPOItems) {
+//       if (it.received_quantity < it.quantity) {
+//         allReceived = false;
+//       }
+//       if (it.received_quantity > 0) {
+//         anyReceived = true;
+//       }
+//     }
+
+//     const newPOStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Received' : 'Confirmed');
+
+//     await connection.query(
+//       'UPDATE purchase_orders SET status = ? WHERE id = ?',
+//       [newPOStatus, poId]
+//     );
+
+//     await connection.commit();
+//     await logActivity(req.user.id, 'Create GRN', 'Purchases', `Created Goods Received Note "${grnNo}" for PO "${purchase_order_no}"`, req.ip);
+
+//     return res.status(201).json({
+//       success: true,
+//       message: 'Goods Received Note saved and stock levels updated successfully',
+//       grnNo,
+//       grnId
+//     });
+//   } catch (error) {
+//     await connection.rollback();
+//     next(error);
+//   } finally {
+//     connection.release();
+//   }
+// };
+
+// // @desc    Get all GRNs linked to a Purchase Order
+// // @route   GET /api/purchases/orders/:id/grns
+// // @access  Private
+// export const getGRNsForPO = async (req, res, next) => {
+//   try {
+//     const { id: poId } = req.params;
+
+//     const [grns] = await req.db.query(`
+//       SELECT g.*, w.name as warehouse_name, v.name as vendor_name
+//       FROM grns g
+//       LEFT JOIN warehouses w ON g.warehouse_id = w.id
+//       LEFT JOIN vendors v ON g.vendor_id = v.id
+//       WHERE g.purchase_order_id = ?
+//       ORDER BY g.date DESC, g.created_at DESC
+//     `, [poId]);
+
+//     // For each GRN, fetch its items
+//     for (const grn of grns) {
+//       const [items] = await req.db.query(`
+//         SELECT gi.*, pr.name as product_name, pr.unit
+//         FROM grn_items gi
+//         JOIN products pr ON gi.product_id = pr.id
+//         WHERE gi.grn_id = ?
+//       `, [grn.id]);
+//       grn.items = items;
+//     }
+
+//     return res.status(200).json({ success: true, grns });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+
+import { logActivity } from '../utils/activityLogger.js';
+import { createNotification, checkStockAlerts } from '../services/notificationService.js';
+import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
+import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
+import { recordValuationLayer } from '../services/valuationLayerService.js';
+import { masterPool } from '../config/tenantDb.js';
+
+const parseToISODate = (val) => {
+  if (!val || val === 'N/A' || val === 'null' || val === 'undefined' || val === '0000-00-00') return null;
+  const str = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.substring(0, 10);
+  }
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}/.test(str)) {
+    const parts = str.split(/[-/]/);
+    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+  }
+  const d = new Date(str);
+  return (!isNaN(d.getTime()) && d.getFullYear() > 2000) ? formatDateToYYYYMMDD(d) : null;
+};
+
+/**
+ * Generates an incremental, vendor-unique batch number for a specific store tenant database.
+ * Format: BAT-[VENDOR_PREFIX]-[INCREMENTAL_SEQUENCE]
+ * Example: BAT-AMU-0001, BAT-AMU-0002, BAT-BRI-0001...
+ */
+export const generateVendorBatchNumbers = async (connection, vendorId, count = 1) => {
+  let prefix = 'VEN';
+  if (vendorId) {
+    const [[vendor]] = await connection.query(
+      'SELECT id, name, company_name FROM vendors WHERE id = ? LIMIT 1',
+      [vendorId]
+    );
+    if (vendor) {
+      const rawName = (vendor.company_name || vendor.name || '').trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (rawName.length >= 3) {
+        prefix = rawName.substring(0, 3);
+      } else if (rawName.length > 0) {
+        prefix = rawName.padEnd(3, 'X');
+      } else {
+        prefix = `V${vendor.id}`;
+      }
+    }
+  }
+
+  const searchPattern = `BAT-${prefix}-%`;
+
+  // Fetch existing batches for this vendor matching prefix pattern
+  const [rows] = await connection.query(
+    'SELECT batch_number FROM purchase_batches WHERE supplier_id = ? AND batch_number LIKE ? ORDER BY id DESC LIMIT 100',
+    [vendorId, searchPattern]
+  );
+
+  let maxSeq = 0;
+  for (const row of rows) {
+    if (row.batch_number) {
+      const parts = row.batch_number.split('-');
+      const lastPart = parts[parts.length - 1];
+      const seq = parseInt(lastPart, 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  // Fallback: check all purchase_batches for this vendor to prevent sequence collision
+  if (maxSeq === 0) {
+    const [allRows] = await connection.query(
+      'SELECT batch_number FROM purchase_batches WHERE supplier_id = ? ORDER BY id DESC LIMIT 100',
+      [vendorId]
+    );
+    for (const row of allRows) {
+      if (row.batch_number) {
+        const matches = row.batch_number.match(/\d+/g);
+        if (matches && matches.length > 0) {
+          const lastNum = parseInt(matches[matches.length - 1], 10);
+          if (!isNaN(lastNum) && lastNum > maxSeq) {
+            maxSeq = lastNum;
+          }
+        }
+      }
+    }
+  }
+
+  const result = [];
+  for (let i = 0; i < count; i++) {
+    maxSeq++;
+    const nextSeqStr = String(maxSeq).padStart(4, '0');
+    result.push(`BAT-${prefix}-${nextSeqStr}`);
+  }
+
+  return result;
+};
+
+// @desc    Get next auto-generated batch number(s) for a supplier/vendor
+// @route   GET /api/purchases/next-batch
+// @access  Private
+export const getNextVendorBatch = async (req, res, next) => {
+  try {
+    const { vendor_id, count } = req.query;
+    if (!vendor_id) {
+      return res.status(400).json({ success: false, message: 'Vendor ID is required' });
+    }
+    const connection = req.db;
+    const batchList = await generateVendorBatchNumbers(connection, Number(vendor_id), Number(count) || 1);
+    res.json({
+      success: true,
+      vendor_id: Number(vendor_id),
+      batch_number: batchList[0],
+      batch_numbers: batchList
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get all purchases for tenant
+// @route   GET /api/purchases
+// @access  Private
+export const getPurchases = async (req, res, next) => {
+  try {
+    const { search, vendorId, vendor_id, paymentStatus, page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let query = `
+      SELECT p.*, COALESCE(v.name, 'Unknown Vendor') as vendor_name, w.name as warehouse_name
+      FROM purchases p
+      LEFT JOIN vendors v ON p.vendor_id = v.id
+      LEFT JOIN warehouses w ON p.warehouse_id = w.id
+      WHERE 1=1
+    `;
+    const queryParams = [];
+
+    if (search) {
+      query += ' AND (p.purchase_no LIKE ? OR v.name LIKE ?)';
+      const searchVal = `%${search}%`;
+      queryParams.push(searchVal, searchVal);
+    }
+
+    const targetVendorId = vendorId || vendor_id;
+    if (targetVendorId) {
+      query += ' AND p.vendor_id = ?';
+      queryParams.push(targetVendorId);
+    }
+
+    if (paymentStatus && paymentStatus !== 'all') {
+      query += ' AND p.payment_status = ?';
+      queryParams.push(paymentStatus);
+    }
+
+    query += ' ORDER BY p.date DESC, p.created_at DESC LIMIT ? OFFSET ?';
+    queryParams.push(Number(limit), Number(offset));
+
+    const [purchases] = await req.db.query(query, queryParams);
+    const mappedPurchases = purchases.map(p => {
+      const tot = Number(p.total || 0);
+      const paid = Number(p.paid_amount || 0);
+      let status = p.payment_status || 'Pending';
+      if (paid >= tot && tot > 0) {
+        status = 'Paid';
+      } else if (paid > 0) {
+        status = 'Partial';
+      } else {
+        status = 'Pending';
+      }
+      return {
+        ...p,
+        paid_amount: paid,
+        payment_status: status
+      };
+    });
+
+    return res.status(200).json({ success: true, count: mappedPurchases.length, purchases: mappedPurchases });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get single purchase detail
+// @route   GET /api/purchases/:id
+// @access  Private
+export const getPurchaseById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const [purchases] = await req.db.query(`
+      SELECT p.*, 
+             COALESCE(v.name, 'Unknown Vendor') as vendor_name, 
+             COALESCE(v.company_name, v.name, 'Unknown Vendor') as vendor_company,
+             v.contact_person as vendor_contact_person,
+             v.phone as vendor_phone, 
+             v.email as vendor_email, 
+             v.address as vendor_address, 
+             v.city as vendor_city,
+             v.state as vendor_state,
+             v.pincode as vendor_pincode,
+             v.gstin as vendor_gstin,
+             w.name as warehouse_name,
+             po.purchase_order_no as purchase_order_no
+      FROM purchases p
+      LEFT JOIN vendors v ON p.vendor_id = v.id
+      LEFT JOIN warehouses w ON p.warehouse_id = w.id
+      LEFT JOIN purchase_orders po ON p.purchase_order_id = po.id
+      WHERE p.id = ?
+    `, [id]);
+
+    if (purchases.length === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase record not found' });
+    }
+
+    const purchase = purchases[0];
+
+    // Build real vendor formatted address
+    const vendorAddressParts = [
+      purchase.vendor_address,
+      purchase.vendor_city,
+      purchase.vendor_state ? (purchase.vendor_pincode ? `${purchase.vendor_state} - ${purchase.vendor_pincode}` : purchase.vendor_state) : purchase.vendor_pincode
+    ].filter(p => p && String(p).trim() !== '');
+    purchase.vendor_full_address = vendorAddressParts.length > 0 ? vendorAddressParts.join(', ') : (purchase.vendor_address || '');
+
+    // Fetch items with barcode, sku, hsn_code, batch, returned quantities & stock
+    const [items] = await req.db.query(`
+      SELECT pi.*, 
+             pr.name as product_name, 
+             pr.unit,
+             pr.barcode,
+             pr.sku,
+             pr.hsn_code,
+             COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id AND status != 'Void'), 0) as returnedQuantity,
+             COALESCE((SELECT SUM(quantity) FROM stock WHERE product_id = pi.product_id), 0) as current_stock,
+             COALESCE(
+               (SELECT batch_number FROM purchase_batches WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id LIMIT 1),
+               (SELECT batch_number FROM purchase_batches WHERE grn_id = ? AND product_id = pi.product_id LIMIT 1),
+               NULL
+             ) as batch_number
+      FROM purchase_items pi
+      JOIN products pr ON pi.product_id = pr.id
+      WHERE pi.purchase_id = ?
+    `, [purchase.grn_id || 0, id]);
+
+    purchase.items = items;
+
+    // Fetch store configuration & sanitize dummy defaults
+    let storeInfo = {
+      store_name: '',
+      address: '',
+      phone: '',
+      email: '',
+      gstin: '',
+      logo_url: ''
+    };
+
+    try {
+      const [settingsRows] = await req.db.query('SELECT `key`, `value` FROM settings');
+      const settingsObj = {};
+      for (const s of settingsRows) settingsObj[s.key] = s.value;
+
+      let tenantMeta = null;
+      if (req.tenantId) {
+        const [tRows] = await masterPool.query('SELECT store_name, address, phone, email, gstin, logo_url FROM tenants WHERE id = ?', [req.tenantId]);
+        if (tRows.length > 0) tenantMeta = tRows[0];
+      }
+
+      const isDummyAddress = (addr) => !addr || String(addr).toLowerCase().includes('enter store address') || String(addr).toLowerCase().includes('malviya nagar') || String(addr).toLowerCase().includes('main commercial market') || String(addr).toLowerCase().includes('main market, city center');
+      const isDummyPhone = (p) => !p || String(p).replace(/\D/g, '') === '0000000000' || String(p).replace(/\D/g, '').startsWith('000000') || String(p).replace(/\D/g, '') === '9876543210';
+      const isDummyGstin = (g) => !g || String(g).trim().toUpperCase() === '07AAAAA1111A1Z1' || String(g).trim().toUpperCase() === '07BBBCC2222B2Z2';
+
+      storeInfo.store_name = settingsObj.store_name && settingsObj.store_name !== 'KIRANA MART ERP' && settingsObj.store_name !== 'Kirana Mart Enterprise' ? settingsObj.store_name : (tenantMeta?.store_name || 'Store Invoice');
+      storeInfo.address = (!isDummyAddress(settingsObj.store_address)) ? settingsObj.store_address : ((!isDummyAddress(tenantMeta?.address)) ? tenantMeta.address : '');
+      storeInfo.phone = (!isDummyPhone(settingsObj.store_phone)) ? settingsObj.store_phone : ((!isDummyPhone(tenantMeta?.phone)) ? tenantMeta.phone : '');
+      storeInfo.email = (settingsObj.store_email && !settingsObj.store_email.includes('kiranamart.com')) ? settingsObj.store_email : (tenantMeta?.email || '');
+      storeInfo.gstin = (!isDummyGstin(settingsObj.gstin)) ? settingsObj.gstin : ((!isDummyGstin(tenantMeta?.gstin)) ? tenantMeta.gstin : '');
+      storeInfo.logo_url = settingsObj.store_logo || tenantMeta?.logo_url || '';
+    } catch (e) {
+      console.warn('[getPurchaseById] storeInfo fetch notice:', e.message);
+    }
+
+    purchase.store_info = storeInfo;
+    purchase.store_name = storeInfo.store_name;
+    purchase.store_address = storeInfo.address;
+    purchase.store_phone = storeInfo.phone;
+    purchase.store_email = storeInfo.email;
+    purchase.store_gstin = storeInfo.gstin;
+    purchase.store_logo = storeInfo.logo_url;
+
+    return res.status(200).json({ success: true, purchase, store: storeInfo });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Create new purchase invoice (Stock In)
+// @route   POST /api/purchases
+// @access  Private
+export const createPurchase = async (req, res, next) => {
+  console.log('[createPurchase] req.body:', JSON.stringify(req.body));
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    let vendor_id = Number(req.body.vendor_id || req.body.vendorId || 0);
+    let warehouse_id = Number(req.body.warehouse_id || req.body.warehouseId || 1);
+    const date = req.body.date || req.body.purchase_date || new Date().toISOString().split('T')[0];
+    const subtotal = req.body.subtotal || 0;
+    const discount = req.body.discount || 0;
+    const gst_amount = req.body.gst_amount || req.body.gstAmount || 0;
+    const total = req.body.total || 0;
+    const payment_status = req.body.payment_status || req.body.paymentStatus || req.body.payment_type || 'Paid';
+    const delivery_status = req.body.delivery_status || req.body.deliveryStatus || 'Received';
+    const payment_method = req.body.payment_method || req.body.paymentMethod || req.body.payment_type || 'Cash';
+    const items = req.body.items;
+    const purchase_order_id = req.body.purchase_order_id || req.body.purchaseOrderId || null;
+    const grn_id = req.body.grn_id || req.body.grnId || null;
+
+    if (purchase_order_id) {
+      const [poRow] = await connection.query('SELECT vendor_id, warehouse_id, status FROM purchase_orders WHERE id = ?', [purchase_order_id]);
+      if (poRow.length > 0) {
+        if (poRow[0].status === 'Completed') {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: 'This Purchase Order slip has already been finalized and locked. No further purchase invoice entries can be created for it.'
+          });
+        }
+        if (!vendor_id || vendor_id === 0) vendor_id = Number(poRow[0].vendor_id);
+        if (!warehouse_id) warehouse_id = Number(poRow[0].warehouse_id || 1);
+      }
+    }
+
+    if (!vendor_id || vendor_id === 0) {
+      const [vFirst] = await connection.query('SELECT id FROM vendors LIMIT 1');
+      if (vFirst.length > 0) {
+        vendor_id = Number(vFirst[0].id);
+      }
+    }
+
+    console.log('[createPurchase] parsed vendor_id:', vendor_id, 'items:', items);
+
+    if (!vendor_id || !items || items.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Missing purchase header details or products list' });
+    }
+
+    // 15-Second Duplicate Submission Guard (prevents rapid double-clicks from creating duplicate purchases)
+    const [recentDup] = await connection.query(`
+      SELECT id, purchase_no 
+      FROM purchases 
+      WHERE vendor_id = ? AND total = ? AND DATE(date) = DATE(?) AND created_at >= DATE_SUB(NOW(), INTERVAL 15 SECOND)
+      LIMIT 1
+    `, [vendor_id, total || 0, date]);
+
+    if (recentDup.length > 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(200).json({
+        success: true,
+        message: 'Purchase invoice created successfully (duplicate submission suppressed)',
+        purchaseNo: recentDup[0].purchase_no,
+        purchaseId: recentDup[0].id
+      });
+    }
+
+    // Generate tenant purchase invoice number safely (collision free)
+    const year = new Date(date).getFullYear();
+    const [allPurchases] = await connection.query('SELECT purchase_no FROM purchases WHERE purchase_no LIKE ?', [`PUR-%-${year}`]);
+    let maxSeq = 0;
+    for (const row of allPurchases) {
+      const parts = row.purchase_no.split('-');
+      const seq = parseInt(parts[1], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+    const purchaseNo = `PUR-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+    // Calculate payment status and total amounts safely
+    const itemsTotal = Array.isArray(items) ? items.reduce((sum, item) => {
+      const q = Number(item.quantity || 0);
+      const p = Number(item.purchase_price || item.purchasePrice || item.price || item.unit_price || 0);
+      return sum + (q * p);
+    }, 0) : 0;
+
+    const invoiceSubtotal = Number(subtotal || itemsTotal);
+    const invoiceTotal = Number(total || (invoiceSubtotal - Number(discount || 0) + Number(gst_amount || 0)));
+    let actualPaymentStatus = payment_status || 'Pending';
+    let initialPaid = Number(req.body.paid_amount || 0);
+
+    if (actualPaymentStatus === 'Paid' && initialPaid === 0) {
+      initialPaid = invoiceTotal;
+    } else if (actualPaymentStatus === 'Partial' && initialPaid === 0) {
+      initialPaid = invoiceTotal / 2;
+    }
+
+    if (initialPaid >= invoiceTotal && invoiceTotal > 0) {
+      actualPaymentStatus = 'Paid';
+    } else if (initialPaid > 0) {
+      actualPaymentStatus = 'Partial';
+    } else {
+      actualPaymentStatus = 'Pending';
+      initialPaid = 0;
+    }
+
+    // Insert Purchase
+    const [result] = await connection.query(
+      `INSERT INTO purchases (purchase_no, vendor_id, warehouse_id, date, subtotal, discount, gst_amount, total, paid_amount, payment_status, delivery_status, payment_method, purchase_order_id, grn_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        purchaseNo, vendor_id, warehouse_id, date, 
+        invoiceSubtotal, discount || 0, gst_amount || 0, invoiceTotal, initialPaid,
+        actualPaymentStatus, delivery_status || 'Received', payment_method || 'Cash',
+        purchase_order_id || null, grn_id || null
+      ]
+    );
+
+    const purchaseId = result.insertId;
+    let stockAlreadyAdded = !!grn_id;
+    if (!stockAlreadyAdded && purchase_order_id) {
+      const [existingGrn] = await connection.query('SELECT id FROM grns WHERE purchase_order_id = ? LIMIT 1', [purchase_order_id]);
+      if (existingGrn.length > 0) {
+        stockAlreadyAdded = true;
+      }
+    }
+
+    // Loop items to save & update stock
+    for (const item of items) {
+      const targetProductId = Number(item.product_id || item.productId || item.id || 0);
+      if (!targetProductId || isNaN(targetProductId)) continue;
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [targetProductId]);
+      const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
+      const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
+      const defaultProdPurchasePrice = prod ? Number(prod.purchase_price || 0) : 0;
+
+      const itemMrp = Number(item.mrp || item.max_retail_price || defaultProdMrp);
+      const itemSellingPrice = Number(item.selling_price || item.sellingPrice || defaultProdSellingPrice);
+      const rawPrice = item.purchase_price ?? item.purchasePrice ?? item.price ?? item.unit_price;
+      const itemPurchasePrice = (rawPrice !== undefined && rawPrice !== null && !isNaN(Number(rawPrice)) && Number(rawPrice) > 0)
+        ? Number(rawPrice)
+        : defaultProdPurchasePrice;
+      const itemQty = Number(item.quantity_received ?? item.received_quantity ?? item.quantity ?? 0);
+      const itemGst = Number(item.gst || item.gst_amount || item.tax || 0);
+      const itemTotal = Number(item.total || (itemQty * itemPurchasePrice));
+
+      await connection.query(
+        `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [purchaseId, targetProductId, itemQty, itemPurchasePrice, itemMrp, itemGst, itemTotal]
+      );
+
+      if (!stockAlreadyAdded) {
+        let resolvedBatchNo = item.batch_number || item.batch_no;
+        if (!resolvedBatchNo || String(resolvedBatchNo).trim() === '' || String(resolvedBatchNo).startsWith('BATCH-')) {
+          const [autoBatch] = await generateVendorBatchNumbers(connection, vendor_id, 1);
+          resolvedBatchNo = autoBatch;
+        }
+
+        // Create batch record in purchase_batches for FIFO tracking
+        await connection.query(
+          `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, purchase_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetProductId,
+            resolvedBatchNo,
+            itemQty,
+            itemQty,
+            date,
+            parseToISODate(item.expiry_date || item.expDate),
+            itemPurchasePrice,
+            itemMrp,
+            itemSellingPrice,
+            vendor_id,
+            warehouse_id,
+            purchaseId
+          ]
+        );
+
+        // Increment stock in stock table per product + warehouse
+        const [existingStock] = await connection.query(
+          'SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1',
+          [targetProductId, warehouse_id]
+        );
+
+        let prevQty = 0;
+        if (existingStock.length > 0) {
+          prevQty = Number(existingStock[0].quantity);
+          await connection.query(
+            'UPDATE stock SET quantity = quantity + ? WHERE id = ?',
+            [itemQty, existingStock[0].id]
+          );
+        } else {
+          await connection.query(
+            'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
+            [targetProductId, warehouse_id, itemQty]
+          );
+        }
+
+        // Log Stock movement per vendor
+        await connection.query(
+          `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+           VALUES (?, ?, ?, 'Stock In', ?, ?, ?, ?, ?, ?)`,
+          [targetProductId, warehouse_id, vendor_id, itemQty, purchaseNo, 'Purchase Invoice Entry', req.user ? req.user.id : 1, prevQty, prevQty + itemQty]
+        );
+
+        // Record Purchase Receipt Valuation Layer for Odoo 19 Ledger
+        try {
+          const newQty = prevQty + itemQty;
+          const prevVal = Number((prevQty * itemPurchasePrice).toFixed(2));
+          const newVal = Number((newQty * itemPurchasePrice).toFixed(2));
+
+          await recordValuationLayer(connection, {
+            productId: targetProductId,
+            warehouseId: warehouse_id,
+            batchId: null,
+            transactionType: 'Purchase Receipt',
+            referenceNo: purchaseNo,
+            quantityDelta: itemQty,
+            unitCost: itemPurchasePrice,
+            valueDelta: itemTotal,
+            previousQuantity: prevQty,
+            newQuantity: newQty,
+            previousInventoryValue: prevVal,
+            newInventoryValue: newVal,
+            accountingTreatment: 'Inventory Asset',
+            createdBy: req.user ? req.user.id : 1
+          });
+        } catch (pve) {
+          console.warn('[Purchase Valuation Layer] Warning:', pve.message);
+        }
+
+        // Sync FIFO active batch Expiry Date and MRP on Product master
+        await syncProductFifoState(connection, targetProductId);
+      }
+    }
+
+    // Fetch current vendor totals & check existing advance balance BEFORE this purchase
+    const [invSumPre] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSumPre] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySumPre] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRowPre] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    let existingAdvance = 0;
+    if (vRowPre.length > 0) {
+      const grossPre = Number(invSumPre[0].total || 0);
+      const retPre = Number(retSumPre[0].total || 0);
+      const netPre = Math.max(0, grossPre - retPre);
+      const openPre = vRowPre[0].opening_balance_type === 'Advance' ? -Number(vRowPre[0].opening_balance || 0) : Number(vRowPre[0].opening_balance || 0);
+      const totPaidPre = Number(paySumPre[0].total || 0);
+      const diffPre = (netPre + openPre) - totPaidPre;
+      if (diffPre < 0) {
+        existingAdvance = Math.abs(diffPre);
+      }
+    }
+
+    // Determine actual fresh cash paid for this purchase invoice (after applying existing advance credit)
+    let actualFreshPaid = initialPaid;
+    if (existingAdvance > 0 && initialPaid > 0) {
+      actualFreshPaid = Math.max(0, initialPaid - existingAdvance);
+    }
+
+    // Update Vendor totals
+    await connection.query(
+      `UPDATE vendors 
+       SET total_purchases = COALESCE(total_purchases, 0) + ?,
+           total_paid = COALESCE(total_paid, 0) + ?
+       WHERE id = ?`,
+      [invoiceTotal, actualFreshPaid, vendor_id]
+    );
+
+    if (actualFreshPaid > 0) {
+      const year = new Date(date).getFullYear();
+      const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`VPAY-%-${year}`]);
+      let maxSeq = 0;
+      for (const row of allPays) {
+        if (row.payment_no) {
+          const parts = row.payment_no.split('-');
+          const seq = parseInt(parts[1], 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+      const initialPayNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+      await connection.query(
+        `INSERT INTO supplier_payments 
+          (payment_no, vendor_id, purchase_id, payment_date, amount, payment_mode, reference_no, remarks, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          initialPayNo,
+          vendor_id,
+          purchaseId,
+          date || new Date(),
+          actualFreshPaid,
+          payment_method || 'Cash',
+          `INIT-${purchaseNo}`,
+          `Initial Payment for ${purchaseNo}`,
+          req.user ? req.user.id : 1
+        ]
+      );
+    }
+
+    // Fetch updated vendor totals & calculate outstanding balance (Single Source of Truth considering returns & advance credit)
+    const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    if (vRow.length > 0) {
+      const grossP = Number(invSum[0].total || 0);
+      const retP = Number(retSum[0].total || 0);
+      const netP = Math.max(0, grossP - retP);
+      const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+      const totPaid = Number(paySum[0].total || 0);
+      
+      const diff = (netP + openBal) - totPaid;
+      const newBal = Math.max(0, diff);
+
+      await connection.query(
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, vendor_id]
+      );
+
+      // Save Purchase Invoice entry in vendor_ledger
+      await connection.query(
+        `INSERT INTO vendor_ledger 
+          (vendor_id, purchase_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+         VALUES (?, ?, ?, 'PURCHASE_INVOICE', ?, ?, ?, 0.00, ?)`,
+        [
+          vendor_id,
+          purchaseId,
+          date || new Date(),
+          purchaseNo,
+          `Purchase Invoice ${purchaseNo}`,
+          invoiceTotal,
+          newBal
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    await logActivity(req.user ? req.user.id : 1, 'Create Purchase', 'Purchases', `Recorded purchase invoice "${purchaseNo}" (Vendor ID: ${vendor_id})`, req.ip);
+
+    const [vInfo] = await connection.query('SELECT name FROM vendors WHERE id = ?', [vendor_id]);
+    const vendorName = vInfo[0]?.name || 'Unknown Vendor';
+
+    await createNotification({
+      type: 'Purchase Invoice',
+      title: 'New Purchase Recorded',
+      message: `Purchase invoice "${purchaseNo}" recorded from supplier "${vendorName}" for total amount ₹${total}.`,
+      priority: 'Medium',
+      related_user: req.user ? req.user.email : 'System',
+      related_module: 'Purchases',
+      target_roles: 'Admin,Manager,Staff'
+    }, connection);
+
+    for (const item of items) {
+      const targetProductId = Number(item.product_id || item.productId);
+      if (targetProductId) {
+        await checkStockAlerts(connection, targetProductId, req.user ? req.user.id : 1);
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Purchase invoice created successfully',
+      purchaseNo,
+      purchaseId
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// @desc    Delete purchase order (reverts stocks)
+// @route   DELETE /api/purchases/:id
+// @access  Private
+export const deletePurchase = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+
+    // Check purchase details including vendor_id and payment details
+    const [purchases] = await connection.query('SELECT purchase_no, warehouse_id, vendor_id, total, payment_status, purchase_order_id, grn_id FROM purchases WHERE id = ?', [id]);
+    if (purchases.length === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase record not found' });
+    }
+
+    const { purchase_no, warehouse_id, vendor_id, total, payment_status, purchase_order_id, grn_id } = purchases[0];
+    const isLinkedToReceipt = !!grn_id;
+
+    // Fetch items
+    const [items] = await connection.query('SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?', [id]);
+
+    // Delete items, payments and invoice
+    await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    await connection.query('DELETE FROM supplier_payments WHERE purchase_id = ?', [id]);
+    await connection.query('DELETE FROM purchases WHERE id = ?', [id]);
+
+    // Recalculate vendor balance using single source of truth
+    const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    if (vRow.length > 0) {
+      const grossP = Number(invSum[0].total || 0);
+      const retP = Number(retSum[0].total || 0);
+      const netP = Math.max(0, grossP - retP);
+      const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+      const totPaid = Number(paySum[0].total || 0);
+      
+      const diff = (netP + openBal) - totPaid;
+      const newBal = Math.max(0, diff);
+
+      await connection.query(
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, vendor_id]
+      );
+    }
+
+    await connection.commit();
+
+    await logActivity(req.user.id, 'Cancel Purchase', 'Purchases', `Cancelled purchase invoice "${purchase_no}" (ID: ${id})`, req.ip);
+
+    return res.status(200).json({ success: true, message: 'Purchase invoice deleted successfully' });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// ==========================================
+// PURCHASE ORDERS CONTROLLERS
+// ==========================================
+
+// @desc    Get all purchase orders
+// @route   GET /api/purchases/orders
+// @access  Private
+export const getPurchaseOrders = async (req, res, next) => {
+  try {
+    const { search, vendorId, status, page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let query = `
+      SELECT po.*, v.name as vendor_name, w.name as warehouse_name
+      FROM purchase_orders po
+      LEFT JOIN vendors v ON po.vendor_id = v.id
+      LEFT JOIN warehouses w ON po.warehouse_id = w.id
+      WHERE 1=1
+    `;
+    const queryParams = [];
+
+    if (search) {
+      query += ' AND (po.purchase_order_no LIKE ? OR v.name LIKE ?)';
+      const searchVal = `%${search}%`;
+      queryParams.push(searchVal, searchVal);
+    }
+
+    if (vendorId) {
+      query += ' AND po.vendor_id = ?';
+      queryParams.push(vendorId);
+    }
+
+    if (status && status !== 'all') {
+      query += ' AND po.status = ?';
+      queryParams.push(status);
+    }
+
+    query += ' ORDER BY po.date DESC, po.created_at DESC LIMIT ? OFFSET ?';
+    queryParams.push(Number(limit), Number(offset));
+
+    const [orders] = await req.db.query(query, queryParams);
+    return res.status(200).json({ success: true, count: orders.length, purchaseOrders: orders });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get single purchase order detail
+// @route   GET /api/purchases/orders/:id
+// @access  Private
+export const getPurchaseOrderById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const [orders] = await req.db.query(`
+      SELECT po.*, v.name as vendor_name, v.phone as vendor_phone, v.email as vendor_email, 
+             v.address as vendor_address, v.gstin as vendor_gstin,
+             w.name as warehouse_name, COALESCE(u.name, 'Admin') as prepared_by
+      FROM purchase_orders po
+      LEFT JOIN vendors v ON po.vendor_id = v.id
+      LEFT JOIN warehouses w ON po.warehouse_id = w.id
+      LEFT JOIN users u ON po.user_id = u.id
+      WHERE po.id = ?
+    `, [id]);
+
+    if (orders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    }
+
+    const order = orders[0];
+
+    // Fetch items with GRN delivered and damaged metrics
+    const [items] = await req.db.query(`
+      SELECT poi.*, 
+             pr.name as product_name, pr.unit, pr.barcode, cat.name as category,
+             COALESCE((
+               SELECT SUM(gi.quantity_received)
+               FROM grn_items gi 
+               JOIN grns g ON gi.grn_id = g.id
+               WHERE g.purchase_order_id = poi.purchase_order_id AND gi.product_id = poi.product_id
+             ), poi.delivered_quantity, 0) as total_delivered,
+             COALESCE((
+               SELECT SUM(gi.quantity_damaged)
+               FROM grn_items gi 
+               JOIN grns g ON gi.grn_id = g.id
+               WHERE g.purchase_order_id = poi.purchase_order_id AND gi.product_id = poi.product_id
+             ), poi.damaged_quantity, 0) as total_damaged,
+             COALESCE((
+               SELECT SUM(gi.quantity_rejected)
+               FROM grn_items gi 
+               JOIN grns g ON gi.grn_id = g.id
+               WHERE g.purchase_order_id = poi.purchase_order_id AND gi.product_id = poi.product_id
+             ), poi.rejected_quantity, 0) as total_rejected
+      FROM purchase_order_items poi
+      JOIN products pr ON poi.product_id = pr.id
+      LEFT JOIN categories cat ON pr.category_id = cat.id
+      WHERE poi.purchase_order_id = ?
+    `, [id]);
+
+    order.items = items;
+
+    // Calculate aggregated delivery, damage and financial settlement totals
+    let sumOrdered = 0;
+    let sumDelivered = 0;
+    let sumDamaged = 0;
+    let sumAccepted = 0;
+    let sumDamagedDeduction = 0;
+    let sumAcceptedTotal = 0;
+
+    for (const it of items) {
+      const ord = Number(it.quantity || 0);
+      const del = Number(it.total_delivered !== undefined && it.total_delivered !== null ? it.total_delivered : (it.delivered_quantity || 0));
+      const dam = Number(it.total_damaged !== undefined && it.total_damaged !== null ? it.total_damaged : (it.damaged_quantity || 0));
+      const rej = Number(it.total_rejected !== undefined && it.total_rejected !== null ? it.total_rejected : (it.rejected_quantity || 0));
+      const acc = Math.max(0, del - dam - rej);
+      const price = Number(it.purchase_price || 0);
+      const gstP = Number(it.gst || 0);
+      const unitWithTax = price * (1 + gstP / 100);
+
+      it.quantity = ord;
+      it.delivered_quantity = del;
+      it.damaged_quantity = dam;
+      it.rejected_quantity = rej;
+      it.total_delivered = del;
+      it.total_damaged = dam;
+      it.total_rejected = rej;
+      it.received_quantity = acc;
+      it.net_accepted = acc;
+      it.purchase_price = price;
+      it.gst = gstP;
+
+      sumOrdered += ord;
+      sumDelivered += del;
+      sumDamaged += dam;
+      sumAccepted += acc;
+      sumDamagedDeduction += dam * unitWithTax;
+      sumAcceptedTotal += acc * unitWithTax;
+    }
+
+    order.total_ordered_quantity = sumOrdered;
+    order.total_delivered_quantity = sumDelivered;
+    order.total_damaged_quantity = sumDamaged;
+    order.total_accepted_quantity = sumAccepted;
+    order.total_damaged_deduction = Number(sumDamagedDeduction.toFixed(2));
+    order.net_payable_total = Number(sumAcceptedTotal.toFixed(2));
+
+    // Fetch linked GRNs
+    const [grns] = await req.db.query(
+      'SELECT id, grn_no, date, created_at FROM grns WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+      [id]
+    );
+    order.grns = grns;
+
+    // Fetch linked Invoices
+    try {
+      const [invoices] = await req.db.query(
+        'SELECT id, purchase_no, date, total, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+        [id]
+      );
+      order.invoices = invoices;
+    } catch (e) {
+      order.invoices = [];
+    }
+
+    return res.status(200).json({ success: true, order });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Create new purchase order
+// @route   POST /api/purchases/orders
+// @access  Private
+export const createPurchaseOrder = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const {
+      vendor_id,
+      warehouse_id,
+      date,
+      expected_delivery_date,
+      subtotal,
+      discount,
+      gst_amount,
+      total,
+      notes,
+      items
+    } = req.body;
+
+    if (!vendor_id || !warehouse_id || !date || !items || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing purchase order header details or products list' });
+    }
+
+    const year = new Date(date).getFullYear();
+    const [allPOs] = await connection.query('SELECT purchase_order_no FROM purchase_orders WHERE purchase_order_no LIKE ?', [`PO-%-${year}`]);
+    let maxSeq = 0;
+    for (const row of allPOs) {
+      if (row.purchase_order_no) {
+        const parts = row.purchase_order_no.split('-');
+        const seq = parseInt(parts[1], 10);
+        if (!isNaN(seq) && seq > maxSeq) {
+          maxSeq = seq;
+        }
+      }
+    }
+    const poNo = `PO-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+    // Calculate total sums dynamically if not provided
+    let calcSubtotal = 0;
+    let calcGst = 0;
+    const itemRecords = [];
+
+    for (const item of items) {
+      const pId = Number(item.product_id || item.productId || 0);
+      if (!pId) continue;
+
+      const itemPrice = (item.purchase_price !== undefined && item.purchase_price !== null && !isNaN(Number(item.purchase_price)))
+        ? Number(item.purchase_price)
+        : ((item.purchasePrice !== undefined && item.purchasePrice !== null && !isNaN(Number(item.purchasePrice)))
+          ? Number(item.purchasePrice)
+          : (item.price !== undefined && item.price !== null && !isNaN(Number(item.price)) ? Number(item.price) : 0));
+
+      const itemQty = Number(item.quantity) || 1;
+      const itemGst = Number(item.gst || 0);
+      const itemBase = itemPrice * itemQty;
+      const itemTax = itemBase * (itemGst / 100);
+      const itemTotal = Number(item.total) || Number((itemBase + itemTax).toFixed(2));
+
+      calcSubtotal += itemBase;
+      calcGst += itemTax;
+
+      itemRecords.push({ pId, itemQty, itemPrice, itemGst, itemTotal });
+    }
+
+    const finalSubtotal = (subtotal !== undefined && subtotal !== null && Number(subtotal) > 0) ? Number(subtotal) : calcSubtotal;
+    const finalGst = (gst_amount !== undefined && gst_amount !== null && Number(gst_amount) >= 0) ? Number(gst_amount) : calcGst;
+    const finalTotal = (total !== undefined && total !== null && Number(total) > 0) ? Number(total) : (finalSubtotal + finalGst);
+
+    // Verify valid user_id in local tenant DB before inserting into purchase_orders
+    let validUserId = req.user?.id || null;
+    if (validUserId) {
+      const [uCheck] = await connection.query('SELECT id FROM users WHERE id = ?', [validUserId]);
+      if (uCheck.length === 0) {
+        const [uLocal] = await connection.query('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [req.user.email]);
+        validUserId = uLocal.length > 0 ? uLocal[0].id : null;
+      }
+    }
+
+    // Insert PO (including user_id for tracking Prepared By metadata)
+    const [result] = await connection.query(
+      `INSERT INTO purchase_orders (purchase_order_no, vendor_id, warehouse_id, date, expected_delivery_date, subtotal, discount, gst_amount, total, status, notes, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+      [poNo, vendor_id, warehouse_id, date, expected_delivery_date || null, finalSubtotal, discount || 0, finalGst, finalTotal, notes || null, validUserId]
+    );
+
+    const poId = result.insertId;
+
+    // Loop items
+    for (const item of itemRecords) {
+      await connection.query(
+        `INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, delivered_quantity, damaged_quantity, rejected_quantity, received_quantity, purchase_price, gst, total)
+         VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?, ?)`,
+        [poId, item.pId, item.itemQty, item.itemPrice, item.itemGst, item.itemTotal]
+      );
+
+      // Dynamically update product master purchase_price and gst from PO request under FIFO (First In First Out):
+      // 1. If active in-stock batches exist, FIFO ensures the First In (oldest) active batch dictates active purchase price.
+      // 2. If no active in-stock batch exists (fresh product or 0 stock), this PO establishes the incoming purchase price.
+      const [[activeBatch]] = await connection.query(
+        `SELECT id, purchase_price FROM purchase_batches 
+         WHERE product_id = ? AND remaining_quantity > 0 
+         ORDER BY purchase_date ASC, id ASC LIMIT 1`,
+        [item.pId]
+      );
+
+      const updateCols = [];
+      const updateVals = [];
+
+      if (activeBatch && Number(activeBatch.purchase_price) > 0) {
+        updateCols.push('purchase_price = ?');
+        updateVals.push(Number(activeBatch.purchase_price));
+      } else if (item.itemPrice > 0) {
+        updateCols.push('purchase_price = ?');
+        updateVals.push(item.itemPrice);
+      }
+
+      if (item.itemGst !== undefined && item.itemGst !== null && item.itemGst >= 0) {
+        updateCols.push('gst = ?');
+        updateVals.push(item.itemGst);
+      }
+
+      if (updateCols.length > 0) {
+        updateVals.push(item.pId);
+        await connection.query(
+          `UPDATE products SET ${updateCols.join(', ')} WHERE id = ?`,
+          updateVals
+        );
+      }
+    }
+
+    await connection.commit();
+    await logActivity(req.user.id, 'Create Purchase Order', 'Purchases', `Created Purchase Order "${poNo}" (Vendor ID: ${vendor_id})`, req.ip);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Purchase order created successfully',
+      purchaseOrderNo: poNo,
+      purchaseOrderId: poId
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// @desc    Update purchase order status
+// @route   PUT /api/purchases/orders/:id/status
+// @access  Private
+export const updatePurchaseOrderStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ success: false, message: 'Status field is required' });
+    }
+
+    const [po] = await req.db.query('SELECT purchase_order_no FROM purchase_orders WHERE id = ?', [id]);
+    if (po.length === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    }
+
+    await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [status, id]);
+    await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Updated Purchase Order "${po[0].purchase_order_no}" status to "${status}"`, req.ip);
+
+    return res.status(200).json({ success: true, message: 'Purchase order status updated successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete purchase order
+// @route   DELETE /api/purchases/orders/:id
+// @access  Private
+export const deletePurchaseOrder = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+
+    const [po] = await connection.query('SELECT purchase_order_no, status FROM purchase_orders WHERE id = ?', [id]);
+    if (po.length === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    }
+
+    if (!['Draft', 'Cancelled'].includes(po[0].status)) {
+      return res.status(400).json({ success: false, message: 'Cannot delete a purchase order that is confirmed, received, or completed. Cancel it first.' });
+    }
+
+    // Delete items and order
+    await connection.query('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [id]);
+    await connection.query('DELETE FROM purchase_orders WHERE id = ?', [id]);
+
+    await connection.commit();
+    await logActivity(req.user.id, 'Delete Purchase Order', 'Purchases', `Deleted Purchase Order "${po[0].purchase_order_no}"`, req.ip);
+
+    return res.status(200).json({ success: true, message: 'Purchase order deleted successfully' });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// ==========================================
+// GRN CONTROLLERS
+// ==========================================
+
+// @desc    Create GRN (Goods Received Note) and adjust stock levels
+// @route   POST /api/purchases/orders/:id/grn
+// @access  Private
+export const createGRN = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const poId = req.params.id || req.body.purchase_order_id || req.body.poId;
+    const { date, notes, items, auto_create_invoice, finalize_po, include_damaged_payment, include_missing_payment } = req.body;
+
+    if (!date || !items || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing GRN details or products list' });
+    }
+
+    // Get PO details
+    const [orders] = await connection.query('SELECT purchase_order_no, vendor_id, warehouse_id, status FROM purchase_orders WHERE id = ?', [poId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Linked Purchase Order not found' });
+    }
+
+    if (orders[0].status === 'Completed') {
+      return res.status(400).json({ success: false, message: 'This Purchase Order slip has already been finalized and completed. No further GRN or missing item entries can be recorded.' });
+    }
+
+    const { purchase_order_no, vendor_id, warehouse_id } = orders[0];
+
+    // Generate GRN number
+    const year = new Date(date).getFullYear();
+    const [allGRNs] = await connection.query('SELECT grn_no FROM grns WHERE grn_no LIKE ?', [`GRN-%-${year}`]);
+    let maxSeq = 0;
+    for (const row of allGRNs) {
+      if (row.grn_no) {
+        const parts = row.grn_no.split('-');
+        const seq = parseInt(parts[1], 10);
+        if (!isNaN(seq) && seq > maxSeq) {
+          maxSeq = seq;
+        }
+      }
+    }
+    const grnNo = `GRN-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+    // Insert GRN
+    const [grnResult] = await connection.query(
+      `INSERT INTO grns (grn_no, purchase_order_id, vendor_id, warehouse_id, date, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [grnNo, poId, vendor_id, warehouse_id, date, notes || null]
+    );
+
+    const grnId = grnResult.insertId;
+
+    // Fetch PO items
+    const [poItems] = await connection.query('SELECT id, product_id, quantity, received_quantity, purchase_price, gst, total FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+
+    let grnPayableSubtotal = 0;
+    let grnPayableGst = 0;
+    let grnPayableTotal = 0;
+    const grnItemsForInvoice = [];
+
+    // Process items, increment stock, add stock logs, update PO received quantities
+    for (const item of items) {
+      const targetProdId = item.product_id || item.productId || item.id;
+      const poItem = poItems.find(p => String(p.product_id) === String(targetProdId) || String(p.id) === String(item.id));
+      const productId = poItem ? poItem.product_id : targetProdId;
+      if (!productId) continue;
+
+      const qtyRec = Number(item.quantity_received || 0);
+      const qtyDam = Number(item.quantity_damaged || 0);
+      const rawRej = Number(item.quantity_rejected || 0);
+      const qtyMissing = Number(item.quantity_missing || 0);
+      // Guard against legacy payloads where missing was added to rejected:
+      const qtyRej = (rawRej >= qtyMissing && qtyMissing > 0 && (qtyRec - qtyDam - rawRej) < 0)
+        ? Math.max(0, rawRej - qtyMissing)
+        : rawRej;
+      const netAcceptedQty = Math.max(0, qtyRec - qtyDam - qtyRej);
+      const formattedExpiry = parseToISODate(item.expiry_date);
+
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price, gst FROM products WHERE id = ?', [productId]);
+      const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
+      const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
+      const defaultProdPurchasePrice = prod ? Number(prod.purchase_price || 0) : 0;
+      const defaultProdGst = prod ? Number(prod.gst || 0) : 0;
+
+      const rawMrp = item.mrp ?? item.max_retail_price ?? item.maxRetailPrice;
+      const itemMrp = (rawMrp !== undefined && rawMrp !== null && rawMrp !== '' && !isNaN(Number(rawMrp)) && Number(rawMrp) > 0)
+        ? Number(rawMrp)
+        : defaultProdMrp;
+
+      const rawSp = item.selling_price ?? item.sellingPrice;
+      const itemSellingPrice = (rawSp !== undefined && rawSp !== null && rawSp !== '' && !isNaN(Number(rawSp)) && Number(rawSp) > 0)
+        ? Number(rawSp)
+        : defaultProdSellingPrice;
+
+      const rawPp = item.purchase_price ?? item.purchasePrice ?? item.unit_price;
+      const itemPurchasePrice = (rawPp !== undefined && rawPp !== null && rawPp !== '' && !isNaN(Number(rawPp)) && Number(rawPp) > 0)
+        ? Number(rawPp)
+        : ((poItem && poItem.purchase_price && Number(poItem.purchase_price) > 0)
+          ? Number(poItem.purchase_price)
+          : defaultProdPurchasePrice);
+
+      const itemGst = Number(poItem?.gst ?? item.gst ?? defaultProdGst);
+
+      let resolvedBatchNo = item.batch_number || item.batch_no;
+      if (!resolvedBatchNo || String(resolvedBatchNo).trim() === '' || String(resolvedBatchNo).startsWith('BATCH-')) {
+        const [autoBatch] = await generateVendorBatchNumbers(connection, vendor_id, 1);
+        resolvedBatchNo = autoBatch;
+      }
+
+      // Insert grn item record (records delivered, damaged and rejected with resolved MRP and Selling Price)
+      await connection.query(
+        `INSERT INTO grn_items (grn_id, product_id, quantity_received, quantity_damaged, quantity_rejected, batch_number, mrp, selling_price, expiry_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [grnId, productId, qtyRec, qtyDam, qtyRej, resolvedBatchNo, itemMrp > 0 ? itemMrp : null, itemSellingPrice > 0 ? itemSellingPrice : null, formattedExpiry]
+      );
+
+      // Authoritatively update product master with GRN selling_price, mrp, expiry, and PO purchase_price & gst
+      const prodUpdates = [];
+      const prodVals = [];
+      if (itemSellingPrice > 0) {
+        prodUpdates.push('selling_price = ?');
+        prodVals.push(itemSellingPrice);
+      }
+      if (itemMrp > 0) {
+        prodUpdates.push('mrp = ?');
+        prodVals.push(itemMrp);
+      }
+      if (itemPurchasePrice > 0) {
+        prodUpdates.push('purchase_price = ?');
+        prodVals.push(itemPurchasePrice);
+      }
+      if (itemGst >= 0) {
+        prodUpdates.push('gst = ?');
+        prodVals.push(itemGst);
+      }
+      if (formattedExpiry) {
+        prodUpdates.push('expiry_date = ?');
+        prodVals.push(formattedExpiry);
+      }
+      if (prodUpdates.length > 0) {
+        prodVals.push(productId);
+        await connection.query(
+          `UPDATE products SET ${prodUpdates.join(', ')} WHERE id = ?`,
+          prodVals
+        );
+      }
+
+      // Update PO items with Delivered, Damaged, Rejected and Net Accepted Quantities
+      if (poItem) {
+        await connection.query(
+          `UPDATE purchase_order_items 
+           SET delivered_quantity = delivered_quantity + ?,
+               damaged_quantity = damaged_quantity + ?,
+               rejected_quantity = rejected_quantity + ?,
+               received_quantity = received_quantity + ?
+           WHERE id = ?`,
+          [qtyRec, qtyDam, qtyRej, netAcceptedQty, poItem.id]
+        );
+      }
+
+      let payableQty = netAcceptedQty;
+      if (include_damaged_payment) payableQty += qtyDam;
+      if (include_missing_payment) payableQty += Math.max(0, qtyMissing);
+
+      const lineSubtotal = Number((payableQty * itemPurchasePrice).toFixed(2));
+      const lineGst = Number(((lineSubtotal * itemGst) / 100).toFixed(2));
+      const lineTotal = Number((lineSubtotal + lineGst).toFixed(2));
+
+      grnPayableSubtotal += lineSubtotal;
+      grnPayableGst += lineGst;
+      grnPayableTotal += lineTotal;
+
+      grnItemsForInvoice.push({
+        productId,
+        quantity: payableQty > 0 ? payableQty : netAcceptedQty,
+        purchasePrice: itemPurchasePrice,
+        mrp: itemMrp,
+        gst: itemGst,
+        total: lineTotal
+      });
+
+      // Damaged and rejected quantities are NOT counted into available stock or purchase batches!
+      // Only Net Accepted Quantity enters the inventory stock:
+      if (netAcceptedQty > 0) {
+        // Create dedicated batch record in purchase_batches for LIFO/FIFO inventory management
+        await connection.query(
+          `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, grn_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [productId, resolvedBatchNo, netAcceptedQty, netAcceptedQty, date, formattedExpiry, itemPurchasePrice, itemMrp, itemSellingPrice, vendor_id, warehouse_id, grnId]
+        );
+
+        // Update Stock levels
+        const [existingStock] = await connection.query(
+          'SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1',
+          [productId, warehouse_id]
+        );
+
+        let prevQty = 0;
+        if (existingStock.length > 0) {
+          prevQty = Number(existingStock[0].quantity);
+          await connection.query(
+            'UPDATE stock SET quantity = quantity + ? WHERE id = ?',
+            [netAcceptedQty, existingStock[0].id]
+          );
+        } else {
+          await connection.query(
+            'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
+            [productId, warehouse_id, netAcceptedQty]
+          );
+        }
+
+        // Sync LIFO active batch Expiry Date and MRP on Product master
+        await syncProductFifoState(connection, productId);
+
+        // Log Stock movement with delivered vs damaged audit note
+        const noteDetail = qtyDam > 0
+          ? `Goods Received Note (PO: ${purchase_order_no}, Delivered: ${qtyRec}, Damaged: ${qtyDam} [Excluded], Inward: ${netAcceptedQty})`
+          : `Goods Received Note (PO: ${purchase_order_no})`;
+
+        await connection.query(
+          `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+           VALUES (?, ?, ?, 'Stock In', ?, ?, ?, ?, ?, ?)`,
+          [productId, warehouse_id, vendor_id, netAcceptedQty, grnNo, noteDetail, req.user?.id || 1, prevQty, prevQty + netAcceptedQty]
+        );
+
+        // Record Purchase Receipt Valuation Layer
+        try {
+          const newQty = prevQty + netAcceptedQty;
+          const prevVal = Number((prevQty * itemPurchasePrice).toFixed(2));
+          const newVal = Number((newQty * itemPurchasePrice).toFixed(2));
+
+          await recordValuationLayer(connection, {
+            productId: productId,
+            warehouseId: warehouse_id,
+            batchId: null,
+            transactionType: 'Purchase Receipt',
+            referenceNo: grnNo,
+            quantityDelta: netAcceptedQty,
+            unitCost: itemPurchasePrice,
+            valueDelta: lineTotal,
+            previousQuantity: prevQty,
+            newQuantity: newQty,
+            previousInventoryValue: prevVal,
+            newInventoryValue: newVal,
+            accountingTreatment: 'Inventory Asset',
+            createdBy: req.user ? req.user.id : 1
+          });
+        } catch (pve) {
+          console.warn('[GRN Valuation Layer] Warning:', pve.message);
+        }
+      }
+    }
+
+    // Handle Supplier Billing / Purchase Invoice Settlement (Strictly on Net Accepted Goods or selected payment items)
+    grnPayableSubtotal = Number(grnPayableSubtotal.toFixed(2));
+    grnPayableGst = Number(grnPayableGst.toFixed(2));
+    grnPayableTotal = Number(grnPayableTotal.toFixed(2));
+
+    // Look up if a Purchase Invoice already exists for THIS Purchase Order
+    const [existingPOInvoices] = await connection.query(
+      'SELECT id, purchase_no, subtotal, gst_amount, total FROM purchases WHERE purchase_order_id = ? LIMIT 1',
+      [poId]
+    );
+
+    if (existingPOInvoices.length > 0) {
+      if (grnPayableTotal > 0) {
+        const currentPurchId = existingPOInvoices[0].id;
+        const newSubtotal = Number((Number(existingPOInvoices[0].subtotal || 0) + grnPayableSubtotal).toFixed(2));
+        const newGst = Number((Number(existingPOInvoices[0].gst_amount || 0) + grnPayableGst).toFixed(2));
+        const newTotal = Number((Number(existingPOInvoices[0].total || 0) + grnPayableTotal).toFixed(2));
+
+        await connection.query(
+          'UPDATE purchases SET grn_id = ?, subtotal = ?, gst_amount = ?, total = ? WHERE id = ?',
+          [grnId, newSubtotal, newGst, newTotal, currentPurchId]
+        );
+
+        // Insert purchase_items for this GRN shipment
+        for (const it of grnItemsForInvoice) {
+          if (it.quantity > 0) {
+            await connection.query(
+              `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [currentPurchId, it.productId, it.quantity, it.purchasePrice, it.mrp, it.gst, it.total]
+            );
+          }
+        }
+
+        // Recalculate vendor balances
+        const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+        if (vRow.length > 0) {
+          const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [vendor_id]);
+          const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
+          const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+          const grossP = Number(invSum[0].total || 0);
+          const retP = Number(retSum[0].total || 0);
+          const netP = Math.max(0, grossP - retP);
+          const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+          const totPaid = Number(paySum[0].total || 0);
+          const newBal = Math.max(0, (netP + openBal) - totPaid);
+
+          await connection.query('UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?', [grossP, totPaid, newBal, vendor_id]);
+
+          // Update vendor ledger entry for this purchase invoice
+          const [existingLedger] = await connection.query('SELECT id FROM vendor_ledger WHERE purchase_id = ? LIMIT 1', [currentPurchId]);
+          if (existingLedger.length > 0) {
+            await connection.query(
+              'UPDATE vendor_ledger SET debit_amount = ?, running_balance = ?, description = ? WHERE id = ?',
+              [newTotal, newBal, `Purchase Invoice ${existingPOInvoices[0].purchase_no} (PO: ${purchase_order_no}, GRN: ${grnNo})`, existingLedger[0].id]
+            );
+          } else {
+            await connection.query(
+              `INSERT INTO vendor_ledger (vendor_id, purchase_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+               VALUES (?, ?, ?, 'PURCHASE_INVOICE', ?, ?, ?, 0.00, ?)`,
+              [vendor_id, currentPurchId, date, existingPOInvoices[0].purchase_no, `Purchase Invoice ${existingPOInvoices[0].purchase_no} (PO: ${purchase_order_no}, GRN: ${grnNo})`, newTotal, newBal]
+            );
+          }
+        }
+      }
+    } else if (grnPayableTotal > 0) {
+      // Generate Purchase Invoice number
+      const pYear = new Date(date).getFullYear();
+      const [allPurchases] = await connection.query('SELECT purchase_no FROM purchases WHERE purchase_no LIKE ?', [`PUR-%-${pYear}`]);
+      let maxPSeq = 0;
+      for (const row of allPurchases) {
+        if (row.purchase_no) {
+          const parts = row.purchase_no.split('-');
+          const seq = parseInt(parts[1], 10);
+          if (!isNaN(seq) && seq > maxPSeq) maxPSeq = seq;
+        }
+      }
+      const purchaseNo = `PUR-${String(maxPSeq + 1).padStart(4, '0')}-${pYear}`;
+
+      const [purchaseResult] = await connection.query(
+        `INSERT INTO purchases (purchase_no, vendor_id, warehouse_id, date, subtotal, discount, gst_amount, total, paid_amount, payment_status, delivery_status, payment_method, purchase_order_id, grn_id)
+         VALUES (?, ?, ?, ?, ?, 0.00, ?, ?, 0.00, 'Pending', 'Received', 'Credit', ?, ?)`,
+        [purchaseNo, vendor_id, warehouse_id, date, grnPayableSubtotal, grnPayableGst, grnPayableTotal, poId, grnId]
+      );
+      const purchaseId = purchaseResult.insertId;
+
+      for (const it of grnItemsForInvoice) {
+        if (it.quantity > 0) {
+          await connection.query(
+            `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [purchaseId, it.productId, it.quantity, it.purchasePrice, it.mrp, it.gst, it.total]
+          );
+        }
+      }
+
+      // Update vendor balance & vendor_ledger
+      const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+      if (vRow.length > 0) {
+        const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [vendor_id]);
+        const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
+        const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+
+        const grossP = Number(invSum[0].total || 0);
+        const retP = Number(retSum[0].total || 0);
+        const netP = Math.max(0, grossP - retP);
+        const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+        const totPaid = Number(paySum[0].total || 0);
+        const newBal = Math.max(0, (netP + openBal) - totPaid);
+
+        await connection.query(
+          'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+          [grossP, totPaid, newBal, vendor_id]
+        );
+
+        await connection.query(
+          `INSERT INTO vendor_ledger (vendor_id, purchase_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+           VALUES (?, ?, ?, 'PURCHASE_INVOICE', ?, ?, ?, 0.00, ?)`,
+          [vendor_id, purchaseId, date, purchaseNo, `Purchase Invoice ${purchaseNo} (PO: ${purchase_order_no}, GRN: ${grnNo})`, grnPayableTotal, newBal]
+        );
+      }
+    }
+
+    // Update PO Status based on Net Accepted quantities and finalize_po flag
+    const [updatedPOItems] = await connection.query('SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+    let allReceived = true;
+    let anyReceived = false;
+
+    for (const it of updatedPOItems) {
+      if (Number(it.received_quantity) < Number(it.quantity)) {
+        allReceived = false;
+      }
+      if (Number(it.received_quantity) > 0) {
+        anyReceived = true;
+      }
+    }
+
+    const shouldComplete = finalize_po === true || allReceived;
+    const newPOStatus = shouldComplete ? 'Completed' : (anyReceived ? 'Partially Received' : 'Confirmed');
+
+    await connection.query(
+      'UPDATE purchase_orders SET status = ? WHERE id = ?',
+      [newPOStatus, poId]
+    );
+
+    await connection.commit();
+    await logActivity(req.user.id, 'Create GRN', 'Purchases', `Created Goods Received Note "${grnNo}" for PO "${purchase_order_no}"`, req.ip);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Goods Received Note saved and stock levels updated successfully',
+      grnNo,
+      grnId
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// @desc    Get all GRNs linked to a Purchase Order
+// @route   GET /api/purchases/orders/:id/grns
+// @access  Private
+export const getGRNsForPO = async (req, res, next) => {
+  try {
+    const { id: poId } = req.params;
+
+    const [grns] = await req.db.query(`
+      SELECT g.*, w.name as warehouse_name, v.name as vendor_name
+      FROM grns g
+      LEFT JOIN warehouses w ON g.warehouse_id = w.id
+      LEFT JOIN vendors v ON g.vendor_id = v.id
+      WHERE g.purchase_order_id = ?
+      ORDER BY g.date DESC, g.created_at DESC
+    `, [poId]);
+
+    // For each GRN, fetch its items
+    for (const grn of grns) {
+      const [items] = await req.db.query(`
+        SELECT gi.*, pr.name as product_name, pr.unit
+        FROM grn_items gi
+        JOIN products pr ON gi.product_id = pr.id
+        WHERE gi.grn_id = ?
+      `, [grn.id]);
+      grn.items = items;
+    }
+
+    return res.status(200).json({ success: true, grns });
+  } catch (error) {
+    next(error);
+  }
+};

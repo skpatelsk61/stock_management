@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- Top triangle gradient: Vibrant red to purple -->
+    <linearGradient id="topGradient" x1="15%" y1="50%" x2="85%" y2="50%">
+      <stop offset="0%" stop-color="#E83528" />
+      <stop offset="50%" stop-color="#C71565" />
+      <stop offset="100%" stop-color="#7B1FA2" />
+    </linearGradient>
+
+    <!-- Left wing gradient: Bright cyan to deep blue -->
+    <linearGradient id="leftWingGradient" x1="0%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#00C0F0" />
+      <stop offset="60%" stop-color="#0080E0" />
+      <stop offset="100%" stop-color="#0052B3" />
+    </linearGradient>
+
+    <!-- Right wing gradient: Cerulean blue to deep indigo -->
+    <linearGradient id="rightWingGradient" x1="0%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#008CE8" />
+      <stop offset="60%" stop-color="#0066CC" />
+      <stop offset="100%" stop-color="#103680" />
+    </linearGradient>
+
+    <!-- Subtle drop shadow for depth in browser tab -->
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15" />
+    </filter>
+  </defs>
+
+  <!-- Central White 'T' Shape Backing -->
+  <polygon
+    points="33,80 223,80 223,96 153,96 132,242 124,242 103,96 33,96"
+    fill="#FFFFFF"
+  />
+
+  <g filter="url(#subtleShadow)">
+    <!-- 1. Top Triangle -->
+    <polygon
+      points="128,14 223,82 33,82"
+      fill="url(#topGradient)"
+    />
+
+    <!-- 2. Left Wing -->
+    <polygon
+      points="35,95 103,117 124,242"
+      fill="url(#leftWingGradient)"
+    />
+
+    <!-- 3. Right Wing -->
+    <polygon
+      points="221,95 153,117 132,242"
+      fill="url(#rightWingGradient)"
+    />
+  </g>
+</svg>

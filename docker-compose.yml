@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql_database
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: kirana_erp_master
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db-init:/docker-entrypoint-initdb.d
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: pma
+    restart: always
+    environment:
+      PMA_HOST: mysql-db
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql-db
+
+  node_api:
+    build: ./backend
+    container_name: node_backend
+    restart: always
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mysql-db
+
+  react_frontend:
+    build: ./frontend
+    container_name: react_app
+    restart: always
+    ports:
+      - "5173:5173"
+    depends_on:
+      - node_api
+    environment:
+      - WATCHPACK_POLLING=true
+
+volumes:
+  db_data:
