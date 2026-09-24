@@ -22,8 +22,76 @@ import {
 // @desc    Get dashboard metrics / KPIs for tenant
 // @route   GET /api/reports/dashboard-kpis
 // @access  Private
+// export const getDashboardKPIs = async (req, res, next) => {
+//   try {
+//     const kpis = await getExecutiveDashboardKPIs(req.db, req.query);
+
+//     // Near Expiry products (active FIFO batch within 30 days)
+//     const [nearExpiry] = await req.db.query(`
+//       SELECT COUNT(*) as count FROM (
+//         SELECT p.id, 
+//                COALESCE(
+//                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+//                  p.expiry_date
+//                ) as active_expiry
+//         FROM products p
+//       ) t
+//       WHERE t.active_expiry IS NOT NULL 
+//         AND t.active_expiry > CURRENT_DATE() 
+//         AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
+//     `);
+
+//     // Expired products (active FIFO batch expired)
+//     const [expired] = await req.db.query(`
+//       SELECT COUNT(*) as count FROM (
+//         SELECT p.id, 
+//                COALESCE(
+//                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+//                  p.expiry_date
+//                ) as active_expiry
+//         FROM products p
+//       ) t
+//       WHERE t.active_expiry IS NOT NULL 
+//         AND t.active_expiry <= CURRENT_DATE()
+//     `);
+
+//     // Category Distribution (Valuation & products count per category using FIFO batch cost)
+//     const [categoryDist] = await req.db.query(`
+//       SELECT c.name as name, COUNT(p.id) as value,
+//              COALESCE(
+//                (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
+//                 FROM purchase_batches pb 
+//                 JOIN products pr2 ON pb.product_id = pr2.id 
+//                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
+//                GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+//              ) as valuation
+//       FROM categories c
+//       LEFT JOIN products p ON c.id = p.category_id
+//       LEFT JOIN stock s ON p.id = s.product_id
+//       GROUP BY c.id
+//     `);
+
+//     return res.status(200).json({
+//       success: true,
+//       kpis: {
+//         ...kpis,
+//         nearExpiry: nearExpiry[0].count,
+//         expired: expired[0].count
+//       },
+//       categoryDist
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
 export const getDashboardKPIs = async (req, res, next) => {
   try {
+    // --- YAHAN PAR YE 2 NAYI LINES ADD KARNI HAIN ---
+    if (req.query.startDate === '') req.query.startDate = null;
+    if (req.query.endDate === '') req.query.endDate = null;
+    // ------------------------------------------------
+
     const kpis = await getExecutiveDashboardKPIs(req.db, req.query);
 
     // Near Expiry products (active FIFO batch within 30 days)
@@ -1109,8 +1177,140 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
 // @desc    Get dynamic inventory summary statistics
 // @route   GET /api/reports/inventory-summary
 // @access  Private
+// export const getInventorySummary = async (req, res, next) => {
+//   try {
+//     const isSuperAdmin = req.user.role === 'Super Admin';
+//     const userRole = req.user.role;
+//     const isStoreStaff = ['Super Admin', 'Admin', 'Sales Manager', 'Sales Employee', 'Purchase Manager', 'Purchase Employee', 'Manager', 'Employee', 'Staff'].includes(userRole);
+
+//     const hasViewProducts = true; // All authenticated store users can see summary metrics
+//     const hasViewStock = true;
+//     const hasViewCategories = true;
+//     const hasManageVendors = true;
+
+//     let totalProducts = 0;
+//     let totalCategories = 0;
+//     let totalSuppliers = 0;
+//     let totalStockQty = 0;
+//     let lowStockProducts = 0;
+//     let outOfStockProducts = 0;
+//     let nearExpiryProducts = 0;
+//     let totalInventoryValue = 0;
+
+//     // 1. Total Products
+//     if (hasViewProducts) {
+//       const [pCount] = await req.db.query('SELECT COUNT(*) as count FROM products');
+//       totalProducts = pCount[0]?.count || 0;
+//     }
+
+//     // 2. Total Categories
+//     if (hasViewCategories) {
+//       const [cCount] = await req.db.query('SELECT COUNT(*) as count FROM categories');
+//       totalCategories = cCount[0]?.count || 0;
+//     }
+
+//     // 3. Total Suppliers
+//     if (hasManageVendors) {
+//       const [vCount] = await req.db.query('SELECT COUNT(*) as count FROM vendors');
+//       totalSuppliers = vCount[0]?.count || 0;
+//     }
+
+//     // 4. Stock & Inventory Value
+//     if (hasViewStock) {
+//       // Total stock quantity sum (Single Source of Truth aligned with Products Page)
+//       const [sQty] = await req.db.query(`
+//         SELECT COALESCE(SUM(total_stock), 0) as total FROM (
+//           SELECT COALESCE(
+//             SUM(s.quantity),
+//             (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+//             0
+//           ) as total_stock
+//           FROM products p
+//           LEFT JOIN stock s ON p.id = s.product_id
+//           GROUP BY p.id
+//         ) as temp
+//       `);
+//       totalStockQty = Number(sQty[0]?.total || 0);
+
+//       // Low Stock count
+//       const [lowStock] = await req.db.query(`
+//         SELECT COUNT(*) as count FROM (
+//           SELECT p.id,
+//                  COALESCE(
+//                    SUM(s.quantity),
+//                    (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+//                    0
+//                  ) as total_stock
+//           FROM products p
+//           LEFT JOIN stock s ON p.id = s.product_id
+//           GROUP BY p.id, p.min_stock
+//           HAVING total_stock <= p.min_stock AND total_stock > 0
+//         ) as temp
+//       `);
+//       lowStockProducts = lowStock[0]?.count || 0;
+
+//       // Out of Stock count
+//       const [outOfStock] = await req.db.query(`
+//         SELECT COUNT(*) as count FROM (
+//           SELECT p.id,
+//                  COALESCE(
+//                    SUM(s.quantity),
+//                    (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+//                    0
+//                  ) as total_stock
+//           FROM products p
+//           LEFT JOIN stock s ON p.id = s.product_id
+//           GROUP BY p.id
+//           HAVING total_stock = 0
+//         ) as temp
+//       `);
+//       outOfStockProducts = outOfStock[0]?.count || 0;
+
+//       // Near Expiry count (active FIFO batch in purchase_batches)
+//       const [nearExp] = await req.db.query(`
+//         SELECT COUNT(*) as count FROM (
+//           SELECT p.id, 
+//                  COALESCE(
+//                    (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+//                    p.expiry_date
+//                  ) as active_expiry
+//           FROM products p
+//         ) t
+//         WHERE t.active_expiry IS NOT NULL 
+//           AND t.active_expiry > CURRENT_DATE() 
+//           AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
+//       `);
+//       nearExpiryProducts = nearExp[0]?.count || 0;
+
+//       // Inventory valuation (Single Source of Truth)
+//       totalInventoryValue = await calculateInventoryValuation(req.db, req.query);
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       summary: {
+//         totalProducts,
+//         totalCategories,
+//         totalSuppliers,
+//         totalStockQty,
+//         lowStockProducts,
+//         outOfStockProducts,
+//         nearExpiryProducts,
+//         totalInventoryValue
+//       }
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
 export const getInventorySummary = async (req, res, next) => {
   try {
+    // --- YAHAN PAR YE 2 NAYI LINES ADD KI GAYI HAIN ---
+    if (req.query.startDate === '') req.query.startDate = null;
+    if (req.query.endDate === '') req.query.endDate = null;
+    // --------------------------------------------------
+
     const isSuperAdmin = req.user.role === 'Super Admin';
     const userRole = req.user.role;
     const isStoreStaff = ['Super Admin', 'Admin', 'Sales Manager', 'Sales Employee', 'Purchase Manager', 'Purchase Employee', 'Manager', 'Employee', 'Staff'].includes(userRole);
