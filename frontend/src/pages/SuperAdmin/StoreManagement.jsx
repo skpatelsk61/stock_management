@@ -551,6 +551,7 @@ const StoreManagement = () => {
                         </div>
                         <input
                           type="text" placeholder="e.g. RAMESH001"
+                          autoComplete="username"
                           value={form.admin_id}
                           onChange={(e) => { setForm({...form, admin_id: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '')}); setFormError(''); }}
                           disabled={!!selectedStore}

@@ -56,9 +56,9 @@ export const getProducts = async (req, res, next) => {
              CASE 
                WHEN COALESCE((SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id), SUM(s.quantity), 0) <= 0 THEN NULL
                ELSE COALESCE(
-                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
-                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.id DESC LIMIT 1),
-                 (SELECT gi.expiry_date FROM grn_items gi WHERE gi.product_id = p.id AND gi.expiry_date IS NOT NULL AND gi.expiry_date != '' AND gi.expiry_date != 'N/A' AND gi.expiry_date != '0000-00-00' ORDER BY gi.id DESC LIMIT 1),
+                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.id DESC LIMIT 1),
+                 (SELECT gi.expiry_date FROM grn_items gi WHERE gi.product_id = p.id AND gi.expiry_date IS NOT NULL AND CAST(gi.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY gi.id DESC LIMIT 1),
                  p.expiry_date
                )
              END as grn_expiry_date,
@@ -120,7 +120,7 @@ export const getProducts = async (req, res, next) => {
       query += ` AND p.expiry_date IS NOT NULL AND p.expiry_date > CURRENT_DATE() AND p.expiry_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)`;
     }
 
-    query += ` GROUP BY p.id`;
+    query += ` GROUP BY p.id, c.name, sc.name, b.name, sc.id, b.id`;
 
     // Stock Status filter
     if (stockStatus === 'low') {
@@ -213,9 +213,9 @@ export const getProductById = async (req, res, next) => {
               CASE 
                 WHEN COALESCE((SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id), SUM(s.quantity), 0) <= 0 THEN NULL
                 ELSE COALESCE(
-                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
-                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.id DESC LIMIT 1),
-                  (SELECT gi.expiry_date FROM grn_items gi WHERE gi.product_id = p.id AND gi.expiry_date IS NOT NULL AND gi.expiry_date != '' AND gi.expiry_date != 'N/A' AND gi.expiry_date != '0000-00-00' ORDER BY gi.id DESC LIMIT 1),
+                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.id DESC LIMIT 1),
+                  (SELECT gi.expiry_date FROM grn_items gi WHERE gi.product_id = p.id AND gi.expiry_date IS NOT NULL AND CAST(gi.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY gi.id DESC LIMIT 1),
                   p.expiry_date
                 )
               END as grn_expiry_date,
@@ -249,7 +249,7 @@ export const getProductById = async (req, res, next) => {
        LEFT JOIN brands b ON p.brand_id = b.id
        LEFT JOIN stock s ON p.id = s.product_id
        WHERE p.id = ?
-       GROUP BY p.id`,
+       GROUP BY p.id, c.name, sc.name, b.name, sc.id, b.id`,
       [id]
     );
 

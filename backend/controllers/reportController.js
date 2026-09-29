@@ -99,12 +99,13 @@ export const getDashboardKPIs = async (req, res, next) => {
       SELECT COUNT(*) as count FROM (
         SELECT p.id, 
                COALESCE(
-                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
                  p.expiry_date
                ) as active_expiry
         FROM products p
       ) t
       WHERE t.active_expiry IS NOT NULL 
+        AND CAST(t.active_expiry AS CHAR) NOT IN ('', 'N/A', '0000-00-00')
         AND t.active_expiry > CURRENT_DATE() 
         AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
     `);
@@ -114,12 +115,13 @@ export const getDashboardKPIs = async (req, res, next) => {
       SELECT COUNT(*) as count FROM (
         SELECT p.id, 
                COALESCE(
-                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
                  p.expiry_date
                ) as active_expiry
         FROM products p
       ) t
       WHERE t.active_expiry IS NOT NULL 
+        AND CAST(t.active_expiry AS CHAR) NOT IN ('', 'N/A', '0000-00-00')
         AND t.active_expiry <= CURRENT_DATE()
     `);
 
@@ -131,12 +133,12 @@ export const getDashboardKPIs = async (req, res, next) => {
                 FROM purchase_batches pb 
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
-               GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+               GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
              ) as valuation
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
-      GROUP BY c.id
+      GROUP BY c.id, c.name
     `);
 
     return res.status(200).json({
@@ -161,21 +163,21 @@ export const getDashboardCharts = async (req, res, next) => {
     // 1. Sales vs Purchases Trends (Monthly breakdown of last 6 months after sales and purchase returns)
     const [salesTrend] = await req.db.query(`
       SELECT DATE_FORMAT(s.date, '%b %Y') as month, 
-             GREATEST(0, COALESCE(SUM(s.total), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE_FORMAT(s2.date, '%Y-%m') = DATE_FORMAT(s.date, '%Y-%m')), 0)) as sales,
+             GREATEST(0, COALESCE(SUM(s.total), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE_FORMAT(s2.date, '%Y-%m') = DATE_FORMAT(MIN(s.date), '%Y-%m')), 0)) as sales,
              COALESCE(SUM(CASE WHEN s.payment_method LIKE '%Credit%' OR s.payment_method LIKE '%Udhar%' OR s.payment_method LIKE '%Borrow%' OR s.due_amount > 0 THEN IF(s.due_amount > 0, s.due_amount, s.total) ELSE 0 END), 0) as udhar
       FROM sales s
       WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(s.date, '%Y-%m')
-      ORDER BY s.date ASC
+      GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
+      ORDER BY MIN(s.date) ASC
     `);
 
     const [purchaseTrend] = await req.db.query(`
       SELECT DATE_FORMAT(p.date, '%b %Y') as month, 
-             GREATEST(0, COALESCE(SUM(p.total), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND pr.status != 'Cancelled'), 0)) as purchases
+             GREATEST(0, COALESCE(SUM(p.total), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN purchases p2 ON pr.purchase_id = p2.id WHERE DATE_FORMAT(p2.date, '%Y-%m') = DATE_FORMAT(MIN(p.date), '%Y-%m') AND pr.status != 'Cancelled'), 0)) as purchases
       FROM purchases p
       WHERE p.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(p.date, '%Y-%m')
-      ORDER BY p.date ASC
+      GROUP BY DATE_FORMAT(p.date, '%Y-%m'), DATE_FORMAT(p.date, '%b %Y')
+      ORDER BY MIN(p.date) ASC
     `);
 
     // Dynamic Goods Received Note (GRN) warehouse inward logs per month
@@ -185,7 +187,7 @@ export const getDashboardCharts = async (req, res, next) => {
              COUNT(CASE WHEN type = 'Stock In' THEN 1 END) as grnCount
       FROM stock_logs
       WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+      GROUP BY DATE_FORMAT(created_at, '%Y-%m'), DATE_FORMAT(created_at, '%b %Y')
     `);
 
     // Calculate monthly COGS for real profit computation
@@ -204,7 +206,7 @@ export const getDashboardCharts = async (req, res, next) => {
       JOIN sales s ON si.sale_id = s.id
       JOIN products pr ON si.product_id = pr.id
       WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(s.date, '%Y-%m')
+      GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
     `);
 
     // Merge monthly sales and purchases and calculate Net Profit = Net Sales - COGS
@@ -237,12 +239,12 @@ export const getDashboardCharts = async (req, res, next) => {
                 FROM purchase_batches pb 
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
-               GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+               GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
              ) as valuation
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
-      GROUP BY c.id
+      GROUP BY c.id, c.name
     `);
 
     // 3. Warehouse Distribution (Stock quantity per warehouse)
@@ -250,7 +252,7 @@ export const getDashboardCharts = async (req, res, next) => {
       SELECT w.name as name, COALESCE(SUM(s.quantity), 0) as value
       FROM warehouses w
       LEFT JOIN stock s ON w.id = s.warehouse_id
-      GROUP BY w.id
+      GROUP BY w.id, w.name
     `);
 
     // 4. Daily Sales (Last 15 days, net of returns)
@@ -259,7 +261,7 @@ export const getDashboardCharts = async (req, res, next) => {
              GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE s2.date = s.date), 0)) as amount
       FROM sales s
       WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 15 DAY)
-      GROUP BY s.date
+      GROUP BY s.date, DATE_FORMAT(s.date, '%d %b')
       ORDER BY s.date ASC
     `);
 
@@ -270,8 +272,8 @@ export const getDashboardCharts = async (req, res, next) => {
              SUM(CASE WHEN type = 'Stock Out' THEN ABS(quantity) WHEN type = 'Adjustment' AND quantity < 0 THEN ABS(quantity) ELSE 0 END) as stockOut
       FROM stock_logs
       WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-      GROUP BY DATE(created_at)
-      ORDER BY created_at ASC
+      GROUP BY DATE(created_at), DATE_FORMAT(created_at, '%d %b')
+      ORDER BY DATE(created_at) ASC
     `);
 
     return res.status(200).json({
@@ -550,8 +552,8 @@ export const getSalesDashboardData = async (req, res, next) => {
       `SELECT DATE_FORMAT(s.date, '%Y-w%v') as label, SUM(s.total) as revenue, COUNT(s.id) as orders
        FROM sales s
        ${filterQuery}
-       GROUP BY WEEK(s.date)
-       ORDER BY s.date ASC`,
+       GROUP BY DATE_FORMAT(s.date, '%Y-w%v')
+       ORDER BY MIN(s.date) ASC`,
       filterParams
     );
 
@@ -560,8 +562,8 @@ export const getSalesDashboardData = async (req, res, next) => {
       `SELECT DATE_FORMAT(s.date, '%b %Y') as label, SUM(s.total) as revenue, COUNT(s.id) as orders
        FROM sales s
        ${filterQuery}
-       GROUP BY DATE_FORMAT(s.date, '%Y-%m')
-       ORDER BY s.date ASC`,
+       GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
+       ORDER BY MIN(s.date) ASC`,
       filterParams
     );
 
@@ -1006,7 +1008,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       FROM sales s
       ${salesWhere}
       GROUP BY label
-      ORDER BY s.date ASC
+      ORDER BY MIN(s.date) ASC
     `, salesParams);
 
     const [purchTrend] = await db.query(`
@@ -1015,7 +1017,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       FROM purchases p
       ${purchWhere}
       GROUP BY label
-      ORDER BY p.date ASC
+      ORDER BY MIN(p.date) ASC
     `, purchParams);
 
     let returnLabelExpr = "DATE_FORMAT(pr.created_at, '%Y-%m-%d')";
@@ -1403,12 +1405,13 @@ export const getInventorySummary = async (req, res, next) => {
         SELECT COUNT(*) as count FROM (
           SELECT p.id, 
                  COALESCE(
-                   (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date != '' AND pb.expiry_date != 'N/A' AND pb.expiry_date != '0000-00-00' ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
+                   (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
                    p.expiry_date
                  ) as active_expiry
           FROM products p
         ) t
         WHERE t.active_expiry IS NOT NULL 
+          AND CAST(t.active_expiry AS CHAR) NOT IN ('', 'N/A', '0000-00-00')
           AND t.active_expiry > CURRENT_DATE() 
           AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
       `);
