@@ -194,3 +194,12 @@ html.dark tr:hover {
     margin: 0 !important;
   }
 }
+
+/* Hide scrollbar utility across Chrome, Safari, Edge, Firefox */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

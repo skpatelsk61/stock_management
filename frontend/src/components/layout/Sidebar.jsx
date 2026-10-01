@@ -251,8 +251,8 @@ const Sidebar = () => {
   /* ── Menu items ── */
   const menuItems = [
     { label: 'Dashboard',            path: '/dashboard',          icon: HomeIcon },
-    { label: 'Products',             path: '/dashboard/products', icon: ShoppingCartIcon },
     { label: 'Categories',           path: '/dashboard/categories', icon: TagIcon },
+    { label: 'Products',             path: '/dashboard/products', icon: ShoppingCartIcon },
     { label: 'Supplier Master',      path: '/dashboard/vendors',  icon: TruckIcon },
     { label: 'Stock Management',     path: '/dashboard/stock',    icon: CubeIcon },
     { label: 'Sales',                path: '/dashboard/sales',    icon: CurrencyDollarIcon },

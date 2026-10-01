@@ -864,12 +864,12 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
             {/* ─── POS 3-COLUMN LAYOUT ─── */}
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto lg:overflow-hidden bg-gray-50 dark:bg-[#0b0d15] p-3 sm:p-4 gap-4" style={{ minHeight: 0 }}>
                 {/* ─── COLUMN 1: PRODUCT SEARCH (TOP) + CUSTOMER (BOTTOM) ─── */}
-                <div className="lg:col-span-3 flex flex-col bg-white dark:bg-[#11141f] border border-gray-200 dark:border-slate-800 rounded-2xl p-4 gap-4 overflow-y-auto shadow-sm dark:shadow-xl dark:shadow-black/20">
+                <div className="lg:col-span-3 flex flex-col bg-white dark:bg-[#11141f] border border-gray-200 dark:border-slate-800 rounded-2xl p-3.5 gap-3 overflow-y-auto overflow-x-hidden no-scrollbar shadow-sm dark:shadow-xl dark:shadow-black/20">
                     
                     {/* ─── PRODUCT SEARCH (MOVED TO TOP) ─── */}
                     <div className="flex-0" ref={dropdownRef}>
-                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 pb-2.5 mb-2.5">
-                            <span className="flex items-center gap-2">
+                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 pb-2 mb-2">
+                            <span className="flex items-center gap-1.5">
                                 <QrCodeIcon className="w-4 h-4 text-[#0F4C3A] dark:text-emerald-400" /> Search Products
                             </span>
                             <span className="text-[9px] font-mono bg-slate-100 dark:bg-[#0d101a] border border-slate-200 dark:border-slate-800 px-1.5 py-0.5 rounded text-slate-500 font-bold">F3 / Ctrl+F</span>
@@ -988,8 +988,8 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
                     {/* ─── CUSTOMER SECTION (BELOW SEARCH) ─── */}
                     <div>
-                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 pb-2.5">
-                            <span className="flex items-center gap-2">
+                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 pb-2 mb-2">
+                            <span className="flex items-center gap-1.5">
                                 <UserIcon className="w-4 h-4 text-[#0F4C3A] dark:text-emerald-400" /> Customer Profile
                             </span>
                             <span className="text-[9px] font-mono bg-slate-100 dark:bg-[#0d101a] border border-slate-200 dark:border-slate-800 px-1.5 py-0.5 rounded text-slate-500 font-bold">F2</span>
@@ -998,7 +998,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
                     {/* Segmented type switcher */}
                     <div>
-                        <label className="text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
+                        <label className="text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest block mb-1">
                             Billing Type
                         </label>
                         <div className="grid grid-cols-2 gap-1 p-1 bg-gray-100 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl">
@@ -1012,7 +1012,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     setPaymentMethod('Cash');
                                     setPaymentRows([{ id: 1, paymentMethod: 'Cash', amount: grandTotal > 0 ? grandTotal : '', isAuto: true }]);
                                 }}
-                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                                     customerType === 'Walk-in'
                                         ? 'bg-[#0F4C3A] text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30'
                                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
@@ -1039,7 +1039,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     setPaymentMethod('Credit / Udhaar');
                                     setPaymentRows([{ id: 1, paymentMethod: 'Credit / Udhaar', amount: 0, isAuto: false }]);
                                 }}
-                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                                     customerType === 'Borrow'
                                         ? 'bg-[#0F4C3A] text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30'
                                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
@@ -1052,16 +1052,29 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
                     {/* Dropdown Customer Selector */}
                     <div className="relative" ref={custDropdownRef}>
-                        <label className="text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
-                            Select Profile
-                        </label>
-                        <div className="flex gap-2">
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest block">
+                                Select Profile
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setNewCustType(customerType);
+                                    setShowAddCustomerModal(true);
+                                }}
+                                className="text-[10px] font-bold text-[#0F4C3A] dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Register New Customer (Ctrl + N)"
+                            >
+                                <UserPlusIcon className="w-3.5 h-3.5" /> + New <span className="text-[8px] font-mono opacity-80 bg-emerald-100 dark:bg-emerald-950/60 px-1 py-0.2 rounded">Ctrl+N</span>
+                            </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
                             <div
                                 onClick={() => setShowCustomerDropdown(!showCustomerDropdown)}
-                                className="flex-1 flex justify-between items-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-700 dark:text-slate-200 cursor-pointer hover:border-[#0F4C3A] dark:hover:border-emerald-500 transition-colors"
+                                className="flex-1 min-w-0 flex justify-between items-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-gray-700 dark:text-slate-200 cursor-pointer hover:border-[#0F4C3A] dark:hover:border-emerald-500 transition-colors"
                             >
-                                <span className="truncate">{customerName || 'Select Customer...'}</span>
-                                <ChevronDownIcon className="w-4 h-4 text-gray-400 dark:text-slate-500" />
+                                <span className="truncate pr-1">{customerName || 'Select Customer...'}</span>
+                                <ChevronDownIcon className="w-4 h-4 text-gray-400 dark:text-slate-500 shrink-0" />
                             </div>
                             <button
                                 type="button"
@@ -1069,10 +1082,10 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     setNewCustType(customerType);
                                     setShowAddCustomerModal(true);
                                 }}
-                                className="px-3 bg-[#0F4C3A] hover:bg-[#1a6b4f] text-white border border-[#0F4C3A] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30"
+                                className="w-9 h-9 shrink-0 bg-[#0F4C3A] hover:bg-[#1a6b4f] text-white border border-[#0F4C3A] rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30"
                                 title="Register New Customer (Ctrl + N)"
                             >
-                                <UserPlusIcon className="w-4 h-4" /> Add <span className="text-[9px] font-mono opacity-80 bg-black/20 px-1 py-0.5 rounded">Ctrl+N</span>
+                                <UserPlusIcon className="w-4 h-4" />
                             </button>
                         </div>
 
@@ -2159,7 +2172,7 @@ const selectedCustomerCard = (customerId, list) => {
     const match = list.find((c) => c.id === customerId);
     if (!match) {
         return (
-            <div className="bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 p-3 rounded-xl text-[11px] text-gray-400 dark:text-slate-500 font-medium italic text-center">
+            <div className="bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 p-2.5 rounded-xl text-[11px] text-gray-400 dark:text-slate-500 font-medium italic text-center">
                 No borrow profile selected. Search or add one.
             </div>
         );
@@ -2168,50 +2181,61 @@ const selectedCustomerCard = (customerId, list) => {
     const prevBalance = Number(match.outstanding_balance || match.balance || 0);
 
     return (
-        <div className="bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 p-3 rounded-xl text-xs font-medium text-gray-700 dark:text-slate-300 space-y-1.5">
-            <div className="flex justify-between items-center mb-0.5">
-                <span className="text-[9px] font-bold text-[#0F4C3A] dark:text-emerald-400 uppercase tracking-widest">
+        <div className="bg-gray-50/90 dark:bg-[#0d101a]/90 border border-gray-200 dark:border-slate-800 p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-slate-300 space-y-1.5 overflow-hidden">
+            <div className="flex justify-between items-center border-b border-gray-200/60 dark:border-slate-800/60 pb-1.5">
+                <span className="text-[9px] font-black text-[#0F4C3A] dark:text-emerald-400 uppercase tracking-widest truncate">
                     Active Profile
                 </span>
-                <span className="text-[8px] bg-emerald-50 dark:bg-emerald-950/40 text-[#0F4C3A] dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+                <span className="text-[8px] bg-emerald-50 dark:bg-emerald-950/40 text-[#0F4C3A] dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider shrink-0">
                     {match.customer_code || 'CUST'}
                 </span>
             </div>
-            <div>
-                Name: <span className="text-gray-900 dark:text-white font-bold">{match.name}</span>
-            </div>
-            <div>
-                Mobile: <span className="text-gray-800 dark:text-slate-200 font-mono">{match.phone || '—'}</span>
-            </div>
-            <div>
-                Payment: <span className="text-gray-800 dark:text-slate-200">{match.payment_mode || 'Cash'}</span>
-            </div>
-            {match.address && (
-                <div>
-                    Address: <span className="text-gray-500 dark:text-slate-400">{match.address}</span>
+
+            <div className="space-y-1">
+                <div className="text-xs truncate">
+                    <span className="text-gray-500 dark:text-slate-400 text-[10px]">Name: </span>
+                    <span className="text-gray-900 dark:text-white font-bold" title={match.name}>{match.name}</span>
                 </div>
-            )}
-            {match.notes && (
-                <div>
-                    Notes: <span className="text-gray-500 dark:text-slate-400 italic">{match.notes}</span>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="truncate">
+                        <span className="text-gray-500 dark:text-slate-400 text-[10px] block">Mobile:</span>
+                        <span className="text-gray-800 dark:text-slate-200 font-mono font-semibold">{match.phone || '—'}</span>
+                    </div>
+                    <div className="truncate">
+                        <span className="text-gray-500 dark:text-slate-400 text-[10px] block">Payment:</span>
+                        <span className="text-gray-800 dark:text-slate-200 font-semibold">{match.payment_mode || 'Credit/Borrow'}</span>
+                    </div>
                 </div>
-            )}
+                {match.address && (
+                    <div className="text-[11px] truncate" title={match.address}>
+                        <span className="text-gray-500 dark:text-slate-400 text-[10px]">Address: </span>
+                        <span className="text-gray-600 dark:text-slate-300 font-medium">{match.address}</span>
+                    </div>
+                )}
+                {match.notes && (
+                    <div className="text-[11px] truncate" title={match.notes}>
+                        <span className="text-gray-500 dark:text-slate-400 text-[10px]">Notes: </span>
+                        <span className="text-gray-500 dark:text-slate-400 italic">{match.notes}</span>
+                    </div>
+                )}
+            </div>
+
             {/* ── Previous Outstanding Balance (Bakaya) & Advance Balance (Jama) ── */}
             {match.customer_type === 'Borrow' && (() => {
                 const advBalance = Number(match.advance_balance || 0);
                 return (
-                    <div className="space-y-1.5 mt-1.5">
+                    <div className="space-y-1 pt-0.5">
                         {advBalance > 0 && (
-                            <div className="flex justify-between items-center p-2 rounded-lg border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50">
+                            <div className="flex justify-between items-center px-2 py-1 rounded-lg border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50">
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                                    💰 Jama (Advance Credit)
+                                    💰 Jama (Advance)
                                 </span>
-                                <span className="font-mono font-black text-sm text-emerald-700 dark:text-emerald-300">
+                                <span className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-300">
                                     ₹{advBalance.toFixed(2)}
                                 </span>
                             </div>
                         )}
-                        <div className={`flex justify-between items-center p-2 rounded-lg border ${
+                        <div className={`flex justify-between items-center px-2 py-1 rounded-lg border ${
                             prevBalance > 0
                                 ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/50'
                                 : advBalance > 0
@@ -2227,7 +2251,7 @@ const selectedCustomerCard = (customerId, list) => {
                             }`}>
                                 {prevBalance > 0 ? '⚠ Pichla Bakaya' : '✓ Dues: Clear'}
                             </span>
-                            <span className={`font-mono font-bold text-sm ${
+                            <span className={`font-mono font-bold text-xs ${
                                 prevBalance > 0
                                     ? 'text-red-700 dark:text-red-300'
                                     : advBalance > 0

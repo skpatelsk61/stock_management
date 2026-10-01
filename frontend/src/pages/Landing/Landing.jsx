@@ -85,7 +85,7 @@ const Landing = () => {
             className="h-9 w-auto object-contain bg-white px-2 py-1 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700"
           />
           <div>
-            <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-white leading-none">Stock Management</h1>
+            <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-white leading-none">Inventory Management</h1>
             <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">Enterprise Store OS</p>
           </div>
         </div>
@@ -593,7 +593,7 @@ const Landing = () => {
                 alt="Stock Management Logo"
                 className="h-8 w-auto object-contain bg-white px-2 py-0.5 rounded border border-slate-200"
               />
-              <span className="text-sm font-bold text-slate-900 dark:text-white">Stock Management</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-white">Inventory Management</span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs">
               Inventory, POS billing, and customer credit management engineered for modern retail businesses across India.
@@ -629,7 +629,7 @@ const Landing = () => {
           </div>
         </div>
         <div className="max-w-7xl mx-auto pt-6 border-t border-slate-200 dark:border-slate-800 text-center text-xs font-normal text-slate-500">
-          © 2026 Stock Management. All rights reserved. Encrypted and secured.
+          © 2026 Inventory Management. All rights reserved. Encrypted and secured.
         </div>
       </footer>
     </div>
