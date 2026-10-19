@@ -137,7 +137,7 @@ const Landing = () => {
 
           {/* Dominant Headline */}
           <h2 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.15]">
-            Manage Your Business <br />
+            Manage Your Business<br />
             <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 bg-clip-text text-transparent">
               Smarter, Faster, Better.
             </span>
