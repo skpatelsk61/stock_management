@@ -1,6 +1,6 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
-import { validateEmailField, validateGSTINField, validatePANField, parseGSTIN } from '../utils/validators.js';
+import { validateEmailField } from '../utils/validators.js';
 
 
 // @desc    Get all vendors with summary totals
@@ -135,30 +135,11 @@ export const createVendor = async (req, res, next) => {
       return res.status(400).json({ success: false, message: `A supplier with mobile number "${cleanedPhone}" already exists.`, field: 'phone' });
     }
 
-    // Official Indian GSTIN Validation & Duplicate Check
-    let cleanGstin = null;
-    if (gstin && String(gstin).trim() !== '') {
-      cleanGstin = String(gstin).trim().toUpperCase();
-      const gstinErr = validateGSTINField(cleanGstin, false);
-      if (gstinErr) {
-        return res.status(400).json({ success: false, message: gstinErr, field: 'gstin' });
-      }
-      const [dupGstin] = await req.db.query('SELECT id FROM vendors WHERE gstin = ?', [cleanGstin]);
+    if (gstin) {
+      const [dupGstin] = await req.db.query('SELECT id FROM vendors WHERE gstin = ?', [gstin]);
       if (dupGstin.length > 0) {
-        return res.status(400).json({ success: false, message: `A supplier with GSTIN "${cleanGstin}" already exists.`, field: 'gstin' });
+        return res.status(400).json({ success: false, message: `A supplier with GSTIN "${gstin}" already exists.`, field: 'gstin' });
       }
-    }
-
-    // Official Indian PAN Validation & Auto-Extraction
-    let cleanPan = null;
-    if (pan && String(pan).trim() !== '') {
-      cleanPan = String(pan).trim().toUpperCase();
-      const panErr = validatePANField(cleanPan, false, cleanGstin);
-      if (panErr) {
-        return res.status(400).json({ success: false, message: panErr, field: 'pan' });
-      }
-    } else if (cleanGstin) {
-      cleanPan = cleanGstin.substring(2, 12);
     }
 
     if (email && String(email).trim() !== '') {
@@ -186,8 +167,8 @@ export const createVendor = async (req, res, next) => {
         cleanedAltPhone || null,
         email || null,
         address || null,
-        cleanGstin || null,
-        cleanPan || null,
+        gstin || null,
+        pan || null,
         company_name || null,
         contact_person || null,
         city || null,
@@ -266,7 +247,7 @@ export const updateVendor = async (req, res, next) => {
       bank_name, account_number, ifsc_code
     } = req.body;
 
-    const [existing] = await req.db.query('SELECT id, name, supplier_code, gstin, pan FROM vendors WHERE id = ?', [id]);
+    const [existing] = await req.db.query('SELECT id, name, supplier_code FROM vendors WHERE id = ?', [id]);
     if (existing.length === 0) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
@@ -291,30 +272,11 @@ export const updateVendor = async (req, res, next) => {
       }
     }
 
-    // Official Indian GSTIN Validation & Duplicate Check
-    let cleanGstin = null;
-    if (gstin && String(gstin).trim() !== '') {
-      cleanGstin = String(gstin).trim().toUpperCase();
-      const gstinErr = validateGSTINField(cleanGstin, false);
-      if (gstinErr) {
-        return res.status(400).json({ success: false, message: gstinErr, field: 'gstin' });
-      }
-      const [dupGstin] = await req.db.query('SELECT id FROM vendors WHERE gstin = ? AND id != ?', [cleanGstin, id]);
+    if (gstin) {
+      const [dupGstin] = await req.db.query('SELECT id FROM vendors WHERE gstin = ? AND id != ?', [gstin, id]);
       if (dupGstin.length > 0) {
-        return res.status(400).json({ success: false, message: `Another supplier with GSTIN "${cleanGstin}" already exists.`, field: 'gstin' });
+        return res.status(400).json({ success: false, message: `Another supplier with GSTIN "${gstin}" already exists.`, field: 'gstin' });
       }
-    }
-
-    // Official Indian PAN Validation & Auto-Extraction
-    let cleanPan = null;
-    if (pan && String(pan).trim() !== '') {
-      cleanPan = String(pan).trim().toUpperCase();
-      const panErr = validatePANField(cleanPan, false, cleanGstin);
-      if (panErr) {
-        return res.status(400).json({ success: false, message: panErr, field: 'pan' });
-      }
-    } else if (cleanGstin) {
-      cleanPan = cleanGstin.substring(2, 12);
     }
 
     if (email && String(email).trim() !== '') {
@@ -363,8 +325,8 @@ export const updateVendor = async (req, res, next) => {
         cleanedAltPhone || null,
         email || null,
         address || null,
-        cleanGstin || null,
-        cleanPan || null,
+        gstin || null,
+        pan || null,
         company_name || null,
         contact_person || null,
         city || null,

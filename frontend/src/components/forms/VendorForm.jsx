@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { validateEmailField, validateGSTINField, validatePANField, parseGSTIN, GST_STATE_CODES, isValidGSTIN } from '../../utils/validators';
+import { validateEmailField } from '../../utils/validators';
 
 const VendorForm = ({ vendor, onSubmit, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -71,41 +71,9 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     let finalValue = value;
-
     if (name === 'phone' || name === 'alternate_phone') {
       finalValue = value.replace(/\D/g, '').slice(0, 10);
-    } else if (name === 'gstin') {
-      // Auto-uppercase and strip non-alphanumeric characters
-      finalValue = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
-
-      // Auto-extract PAN from GSTIN if at least 12 characters are entered
-      const extractedPan = finalValue.length >= 12 ? finalValue.substring(2, 12) : null;
-
-      // Auto-detect State from GSTIN first 2 digits
-      const stateCode = finalValue.length >= 2 ? finalValue.substring(0, 2) : null;
-      const detectedState = stateCode ? GST_STATE_CODES[stateCode] : null;
-
-      setFormData((prev) => {
-        const next = { ...prev, gstin: finalValue };
-        // Sync PAN if empty or if PAN matches previous GSTIN PAN
-        if (extractedPan && (!prev.pan || prev.pan === (prev.gstin ? prev.gstin.substring(2, 12) : ''))) {
-          next.pan = extractedPan;
-        }
-        // Auto-fill state if state is currently empty
-        if (detectedState && !prev.state) {
-          next.state = detectedState;
-        }
-        return next;
-      });
-
-      if (errors.gstin) setErrors((prev) => ({ ...prev, gstin: '' }));
-      if (errors.pan && extractedPan) setErrors((prev) => ({ ...prev, pan: '' }));
-      if (formError) setFormError('');
-      return;
-    } else if (name === 'pan') {
-      finalValue = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
     }
-
     setFormData((prev) => ({ ...prev, [name]: finalValue }));
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
@@ -157,22 +125,6 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
       const emailErr = validateEmailField(formData.email, false);
       if (emailErr) {
         newErrors.email = emailErr;
-      }
-    }
-
-    // Official Indian GSTIN Validation
-    if (formData.gstin?.trim()) {
-      const gstinErr = validateGSTINField(formData.gstin, false);
-      if (gstinErr) {
-        newErrors.gstin = gstinErr;
-      }
-    }
-
-    // Official Indian PAN Validation
-    if (formData.pan?.trim()) {
-      const panErr = validatePANField(formData.pan, false, formData.gstin);
-      if (panErr) {
-        newErrors.pan = panErr;
       }
     }
 
@@ -350,85 +302,41 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                GSTIN Number (15 Characters)
-              </label>
-              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 tracking-wider uppercase">
-                Official GST
-              </span>
-            </div>
+            <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">GSTIN (Taxes) Registration</label>
             <input
               ref={gstinRef}
               type="text"
               name="gstin"
               value={formData.gstin || ''}
               onChange={handleChange}
-              maxLength={15}
-              placeholder="e.g. 27ABCDE1234F1Z5"
-              className={`w-full px-3.5 py-2.5 text-xs border rounded-xl focus:outline-none bg-slate-50/60 dark:bg-slate-950/50 font-mono font-bold tracking-wider transition-all uppercase ${
-                errors.gstin 
-                  ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 dark:text-rose-200 bg-rose-50/30' 
-                  : isValidGSTIN(formData.gstin)
-                    ? 'border-emerald-500 ring-1 ring-emerald-300 dark:ring-emerald-700/50 text-slate-850 dark:text-white'
-                    : 'border-slate-200 dark:border-slate-700 focus:border-emerald-600 dark:focus:border-emerald-500 text-slate-850 dark:text-white'
+              placeholder="GSTIN Number"
+              className={`w-full px-3.5 py-2.5 text-xs border rounded-xl focus:outline-none bg-slate-50/60 dark:bg-slate-950/50 font-mono font-bold transition-all ${
+                errors.gstin ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 dark:text-rose-200 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700 focus:border-emerald-600 dark:focus:border-emerald-500 text-slate-850 dark:text-white'
               }`}
             />
-            {errors.gstin ? (
+            {errors.gstin && (
               <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1 flex items-center gap-1">
                 <span>⚠️</span> {errors.gstin}
-              </p>
-            ) : formData.gstin && isValidGSTIN(formData.gstin) ? (
-              <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                <span>✓</span>
-                <span>
-                  Valid GSTIN • State: {GST_STATE_CODES[formData.gstin.substring(0, 2)]} ({formData.gstin.substring(0, 2)}) • PAN: {formData.gstin.substring(2, 12)}
-                </span>
-              </div>
-            ) : formData.gstin && formData.gstin.length > 0 ? (
-              <div className="flex items-center justify-between text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-1">
-                <span>{formData.gstin.length}/15 chars</span>
-                <span className="text-[9px]">Format: [2 State][10 PAN][1 Entity][Z][1 Check]</span>
-              </div>
-            ) : (
-              <p className="text-[10px] font-medium text-slate-400 mt-1">
-                Optional. Official 15-character GSTIN (e.g. 27ABCDE1234F1Z5)
               </p>
             )}
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                PAN Card Number
-              </label>
-              {formData.gstin && formData.gstin.length >= 12 && formData.pan === formData.gstin.substring(2, 12) && (
-                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                  Auto-linked
-                </span>
-              )}
-            </div>
+            <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">PAN Card Number</label>
             <input
               ref={panRef}
               type="text"
               name="pan"
               value={formData.pan || ''}
               onChange={handleChange}
-              maxLength={10}
-              placeholder="e.g. ABCDE1234F"
-              className={`w-full px-3.5 py-2.5 text-xs border rounded-xl focus:outline-none bg-slate-50/60 dark:bg-slate-950/50 font-mono font-bold tracking-wider transition-all uppercase ${
-                errors.pan 
-                  ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 dark:text-rose-200 bg-rose-50/30' 
-                  : 'border-slate-200 dark:border-slate-700 focus:border-emerald-600 dark:focus:border-emerald-500 text-slate-850 dark:text-white'
+              placeholder="PAN card number"
+              className={`w-full px-3.5 py-2.5 text-xs border rounded-xl focus:outline-none bg-slate-50/60 dark:bg-slate-950/50 font-mono font-bold transition-all ${
+                errors.pan ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 dark:text-rose-200 bg-rose-50/30' : 'border-slate-200 dark:border-slate-700 focus:border-emerald-600 dark:focus:border-emerald-500 text-slate-850 dark:text-white'
               }`}
             />
-            {errors.pan ? (
+            {errors.pan && (
               <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1 flex items-center gap-1">
                 <span>⚠️</span> {errors.pan}
-              </p>
-            ) : (
-              <p className="text-[10px] font-medium text-slate-400 mt-1">
-                10-character business PAN (e.g. ABCDE1234F)
               </p>
             )}
           </div>

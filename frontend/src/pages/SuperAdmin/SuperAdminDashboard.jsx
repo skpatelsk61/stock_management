@@ -88,7 +88,7 @@ const SuperAdminDashboard = () => {
               <ShieldCheckIcon className="w-6 h-6 stroke-[2]" />
             </div>
             <div>
-              <h1 className="text-sm sm:text-base font-black tracking-tight text-slate-900 dark:text-white uppercase leading-none">Inventory Management</h1>
+              <h1 className="text-sm sm:text-base font-black tracking-tight text-slate-900 dark:text-white uppercase leading-none">Kirana Portal</h1>
               <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">Super Administration Center</p>
             </div>
           </div>

@@ -36,20 +36,6 @@ services:
       - ./backend/.env
     depends_on:
       - mysql-db
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
-
-  # react_frontend:
-  #   build: ./frontend
-  #   container_name: react_app
-  #   restart: always
-  #   ports:
-  #     - "5173:5173"
-  #   depends_on:
-  #     - node_api
-  #   environment:
-  #     - WATCHPACK_POLLING=true
 
   react_frontend:
     build: ./frontend
@@ -59,11 +45,8 @@ services:
       - "5173:5173"
     depends_on:
       - node_api
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     environment:
-      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
 
 volumes:
   db_data:

@@ -1003,20 +1003,20 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     // ── 2. PERIOD TRENDS CHART DATA (trends) ──────────────────────────────────
     const [salesTrend] = await db.query(`
       SELECT ${salesLabelExpr} as label, 
-             GREATEST(0, SUM(s.total - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr WHERE sr.sale_id = s.id), 0))) as revenue,
-             SUM(COALESCE((SELECT SUM(si.quantity) FROM sale_items si WHERE si.sale_id = s.id), 0)) as units_sold
+             GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0)) as revenue,
+             COALESCE((SELECT SUM(si.quantity) FROM sale_items si JOIN sales s2 ON si.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0) as units_sold
       FROM sales s
       ${salesWhere}
-      GROUP BY ${salesLabelExpr}
+      GROUP BY label
       ORDER BY MIN(s.date) ASC
     `, salesParams);
 
     const [purchTrend] = await db.query(`
       SELECT ${purchLabelExpr} as label, 
-             GREATEST(0, SUM(p.total - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND (pr.status IS NULL OR pr.status != 'Cancelled')), 0))) as expenses
+             GREATEST(0, SUM(p.total) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND (pr.status IS NULL OR pr.status != 'Cancelled')), 0)) as expenses
       FROM purchases p
       ${purchWhere}
-      GROUP BY ${purchLabelExpr}
+      GROUP BY label
       ORDER BY MIN(p.date) ASC
     `, purchParams);
 
@@ -1039,8 +1039,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
              COALESCE(SUM(pr.total_amount), 0) as returns_val
       FROM purchase_returns pr
       ${returnsWhere}
-      GROUP BY ${returnLabelExpr}
-      ORDER BY MIN(pr.created_at) ASC
+      GROUP BY label
     `, returnsParams);
 
     const trendMap = {};
@@ -1083,7 +1082,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       JOIN sales s ON si.sale_id = s.id
       JOIN products pr ON si.product_id = pr.id
       ${salesWhere}
-      GROUP BY pr.id, pr.name, pr.barcode
+      GROUP BY pr.id
       ORDER BY revenue DESC
       LIMIT 10
     `, salesParams);
@@ -1097,7 +1096,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       JOIN sale_items si ON pr.id = si.product_id
       JOIN sales s ON si.sale_id = s.id
       ${salesWhere}
-      GROUP BY c.id, c.name
+      GROUP BY c.id
       HAVING value > 0
       ORDER BY value DESC
     `, salesParams);
@@ -1131,7 +1130,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       JOIN purchases p ON pi.purchase_id = p.id
       JOIN products pr ON pi.product_id = pr.id
       ${purchWhere}
-      GROUP BY pr.id, pr.name, pr.barcode
+      GROUP BY pr.id
       ORDER BY total_expenses DESC
       LIMIT 10
     `, purchParams);
@@ -1142,7 +1141,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       FROM customers c
       JOIN sales s ON c.id = s.customer_id
       ${salesWhere}
-      GROUP BY c.id, c.name, c.phone
+      GROUP BY c.id
       ORDER BY total_spent DESC
       LIMIT 5
     `, salesParams);
@@ -1153,82 +1152,19 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       FROM vendors v
       JOIN purchases p ON v.id = p.vendor_id
       ${purchWhere}
-      GROUP BY v.id, v.company_name, v.name, v.phone
+      GROUP BY v.id
       ORDER BY total_procured DESC
       LIMIT 5
     `, purchParams);
-
-    // Helper to generate full continuous date timeline
-    const generateTimelineLabels = (startStr, endStr, scale) => {
-      const labels = [];
-      const start = startStr ? new Date(startStr) : new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
-      const end = endStr ? new Date(endStr) : new Date();
-
-      if (scale === 'monthly') {
-        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-        const stop = new Date(end.getFullYear(), end.getMonth(), 1);
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        while (cur <= stop) {
-          labels.push(`${monthNames[cur.getMonth()]} ${cur.getFullYear()}`);
-          cur.setMonth(cur.getMonth() + 1);
-        }
-      } else if (scale === 'yearly') {
-        let yr = start.getFullYear();
-        const endYr = end.getFullYear();
-        while (yr <= endYr) {
-          labels.push(String(yr));
-          yr++;
-        }
-      } else {
-        // daily
-        const cur = new Date(start);
-        cur.setHours(0, 0, 0, 0);
-        const stop = new Date(end);
-        stop.setHours(0, 0, 0, 0);
-        while (cur <= stop) {
-          const y = cur.getFullYear();
-          const m = String(cur.getMonth() + 1).padStart(2, '0');
-          const d = String(cur.getDate()).padStart(2, '0');
-          labels.push(`${y}-${m}-${d}`);
-          cur.setDate(cur.getDate() + 1);
-        }
-      }
-      return labels.length > 0 ? labels : ['Today'];
-    };
-
-    const timelineLabels = generateTimelineLabels(startDate, endDate, timeScale);
-
-    // Build continuous timeline with real transactions, starting at 0 baseline
-    const finalTrends = timelineLabels.map(lbl => {
-      if (trendMap[lbl]) return trendMap[lbl];
-      return { label: lbl, revenue: 0, units_sold: 0, expenses: 0, returns: 0, profit: 0 };
-    });
-
-    let finalCategoryDist = categoryDist;
-    if (finalCategoryDist.length === 0) {
-      // If no category sales yet, check if store has stock valuation by category
-      const [catStockDist] = await db.query(`
-        SELECT c.name as name, COALESCE(SUM(s.quantity * p.purchase_price), 0) as value
-        FROM categories c
-        JOIN products p ON c.id = p.category_id
-        JOIN stock s ON p.id = s.product_id
-        GROUP BY c.id, c.name
-        HAVING value > 0
-        ORDER BY value DESC
-      `);
-      if (catStockDist && catStockDist.length > 0) {
-        finalCategoryDist = catStockDist;
-      }
-    }
 
     return res.status(200).json({
       success: true,
       kpis,
       charts: {
-        trends: finalTrends,
+        trends,
         topProducts,
         topPurchasedProducts: topPurchased,
-        categoryDist: finalCategoryDist,
+        categoryDist,
         topCustomers,
         topSuppliers,
         movementCounts,

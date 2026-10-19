@@ -790,7 +790,6 @@ const Reports = () => {
           ) : (
             <div className="space-y-6">
               
-
               {/* KPI CARDS GRID */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 print:grid-cols-6">
                 {analyticsScope === 'overall' ? (
@@ -1044,81 +1043,68 @@ const Reports = () => {
                 
                 {/* Main Trend line/area chart (2/3 width) */}
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm lg:col-span-2">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                      {analyticsScope === 'overall' ? 'Revenue, Expenses & Net Profit Trends' : 'Product Sales Volume Trend'}
-                    </h3>
-                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                      {analyticsScope === 'overall' 
-                        ? `Total Revenue: ₹${Number(analyticsData.kpis?.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                        : `Total Units Sold: ${analyticsData.kpis?.unitsSold || 0} Pcs`}
-                    </span>
-                  </div>
+                  <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">
+                    {analyticsScope === 'overall' ? 'Revenue, Expenses & Net Profit Trends' : 'Product Sales Volume Trend'}
+                  </h3>
                   <div className="h-72">
-                    {(() => {
-                      const trendData = (analyticsData.charts?.trends && analyticsData.charts.trends.length > 0)
-                        ? analyticsData.charts.trends
-                        : [{ label: 'Today', revenue: 0, units_sold: 0, expenses: 0, returns: 0, profit: 0 }];
-
-                      return (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
-                                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                              </linearGradient>
-                              <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25}/>
-                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                              </linearGradient>
-                              <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
-                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                              </linearGradient>
-                              <linearGradient id="colorReturns" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
-                                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
-                            <XAxis
-                              dataKey="label"
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
-                            />
-                            <YAxis
-                              domain={[0, (dataMax) => (dataMax > 0 ? 'auto' : (analyticsScope === 'overall' ? 1000 : 10))]}
-                              tickFormatter={(val) => analyticsScope === 'overall' ? `₹${Number(val).toLocaleString('en-IN')}` : `${Number(val)} Pcs`}
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
-                                borderColor: isDarkMode ? '#334155' : '#E2E8F0',
-                                color: isDarkMode ? '#F8FAFC' : '#0F172A',
-                                borderRadius: '0.75rem',
-                                fontSize: '11px',
-                                fontWeight: '600',
-                                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                              }}
-                              formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-                            />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
-                            <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
-                            <Area type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2} fillOpacity={0.15} fill="#8b5cf6" />
-                            {analyticsScope === 'overall' && (
-                              <>
-                                <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
-                                <Area type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorReturns)" />
-                                <Area type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
-                              </>
-                            )}
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      );
-                    })()}
+                    {analyticsData.charts?.trends && analyticsData.charts.trends.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={analyticsData.charts.trends} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorReturns" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                            stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                            stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                              borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                              color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                              borderRadius: '0.75rem',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                            }}
+                            formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN')}`}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
+                          <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
+                          <Area type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2} fillOpacity={0.15} fill="#8b5cf6" />
+                          {analyticsScope === 'overall' && (
+                            <>
+                              <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                              <Area type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorReturns)" />
+                              <Area type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
+                            </>
+                          )}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-slate-400 font-bold">No data matches query filters.</div>
+                    )}
                   </div>
                 </div>
 
@@ -1126,156 +1112,89 @@ const Reports = () => {
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
                   {analyticsScope === 'overall' ? (
                     <>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">Category Sales Distribution</h3>
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                          Total: ₹{Number(analyticsData.charts?.categoryDist?.reduce((acc, c) => acc + Number(c.value || 0), 0) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                      <div className="h-72 flex flex-col items-center justify-between">
-                        {(() => {
-                          const hasCategorySales = analyticsData.charts?.categoryDist && analyticsData.charts.categoryDist.some(c => Number(c.value) > 0);
-                          const pieData = hasCategorySales 
-                            ? analyticsData.charts.categoryDist 
-                            : [{ name: 'Baseline', value: 1 }];
-
-                          return (
-                            <>
-                              <div className="w-full h-44 relative flex items-center justify-center">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <PieChart>
-                                    <Pie
-                                      data={pieData}
-                                      cx="50%"
-                                      cy="50%"
-                                      innerRadius={45}
-                                      outerRadius={65}
-                                      paddingAngle={hasCategorySales ? 3 : 0}
-                                      dataKey="value"
-                                    >
-                                      {pieData.map((entry, index) => (
-                                        <Cell 
-                                          key={`cell-${index}`} 
-                                          fill={hasCategorySales ? COLORS[index % COLORS.length] : (isDarkMode ? '#334155' : '#E2E8F0')} 
-                                        />
-                                      ))}
-                                    </Pie>
-                                    <Tooltip formatter={(value, name) => hasCategorySales ? `₹${Number(value).toLocaleString('en-IN')}` : `₹0.00 (Baseline)`} />
-                                  </PieChart>
-                                </ResponsiveContainer>
-                                {!hasCategorySales && (
-                                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                    <span className="text-[11px] font-black text-slate-400 dark:text-slate-500">₹0.00</span>
-                                    <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Baseline</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="w-full max-h-24 overflow-y-auto space-y-1.5 text-[11px] font-bold scrollbar-thin mt-2">
-                                {hasCategorySales ? (
-                                  analyticsData.charts.categoryDist.slice(0, 5).map((cat, idx) => (
-                                    <div key={idx} className="flex items-center justify-between">
-                                      <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
-                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                                        {cat.name}
-                                      </span>
-                                      <span className="text-slate-900 dark:text-white">₹{Number(cat.value).toLocaleString('en-IN')}</span>
-                                    </div>
-                                  ))
-                                ) : categoriesList.length > 0 ? (
-                                  categoriesList.slice(0, 4).map((cat, idx) => (
-                                    <div key={idx} className="flex items-center justify-between">
-                                      <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                                        <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" />
-                                        {cat.name}
-                                      </span>
-                                      <span className="text-slate-400 dark:text-slate-500 font-semibold">₹0.00</span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className="text-center py-2 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
-                                    Starting baseline: ₹0.00 across all categories
-                                  </div>
-                                )}
-                              </div>
-                            </>
-                          );
-                        })()}
+                      <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Category Sales Distribution</h3>
+                      <div className="h-72 flex flex-col items-center justify-center">
+                        {analyticsData.charts?.categoryDist && analyticsData.charts.categoryDist.length > 0 ? (
+                          <div className="w-full h-full flex flex-col justify-between">
+                            <div className="w-full h-44">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                  <Pie
+                                    data={analyticsData.charts.categoryDist}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={45}
+                                    outerRadius={65}
+                                    paddingAngle={3}
+                                    dataKey="value"
+                                  >
+                                    {analyticsData.charts.categoryDist.map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                  </Pie>
+                                  <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+                            <div className="w-full max-h-24 overflow-y-auto space-y-1.5 text-[11px] font-bold scrollbar-thin">
+                              {analyticsData.charts.categoryDist.slice(0, 5).map((cat, idx) => (
+                                <div key={idx} className="flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                    {cat.name}
+                                  </span>
+                                  <span className="text-slate-900 dark:text-white">₹{Number(cat.value).toLocaleString('en-IN')}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-slate-400 font-semibold">No category distribution data.</div>
+                        )}
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Quantity Traded Share</h3>
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                          Total: {((analyticsData.kpis?.unitsSold || 0) + (analyticsData.kpis?.unitsPurchased || 0) + (analyticsData.kpis?.currentStock || 0))} Units
-                        </span>
-                      </div>
-                      <div className="h-72 flex flex-col items-center justify-between">
-                        {(() => {
-                          const sold = Number(analyticsData.kpis?.unitsSold || 0);
-                          const purch = Number(analyticsData.kpis?.unitsPurchased || 0);
-                          const stock = Number(analyticsData.kpis?.currentStock || 0);
-                          const total = sold + purch + stock;
-                          const hasData = total > 0;
-                          const pieData = hasData
-                            ? [
-                                { name: 'Sold', value: sold },
-                                { name: 'Purchased', value: purch },
-                                { name: 'Stock', value: stock }
-                              ]
-                            : [{ name: 'Baseline', value: 1 }];
-
-                          return (
-                            <>
-                              <div className="w-full h-44 relative flex items-center justify-center">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <PieChart>
-                                    <Pie
-                                      data={pieData}
-                                      cx="50%"
-                                      cy="50%"
-                                      innerRadius={45}
-                                      outerRadius={65}
-                                      paddingAngle={hasData ? 3 : 0}
-                                      dataKey="value"
-                                    >
-                                      {hasData ? (
-                                        <>
-                                          <Cell fill="#10b981" />
-                                          <Cell fill="#f59e0b" />
-                                          <Cell fill="#3b82f6" />
-                                        </>
-                                      ) : (
-                                        <Cell fill={isDarkMode ? '#334155' : '#E2E8F0'} />
-                                      )}
-                                    </Pie>
-                                    <Tooltip formatter={(value, name) => hasData ? `${Number(value)} Units` : `0 Units (Baseline)`} />
-                                  </PieChart>
-                                </ResponsiveContainer>
-                                {!hasData && (
-                                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                    <span className="text-[11px] font-black text-slate-400 dark:text-slate-500">0 Units</span>
-                                    <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Baseline</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="w-full space-y-2 mt-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                                <div className="flex items-center justify-between">
-                                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Billed Sales</span>
-                                  <span>{sold} Units</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Procurements</span>
-                                  <span>{purch} Units</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500" /> Current Stock</span>
-                                  <span>{stock} Units</span>
-                                </div>
-                              </div>
-                            </>
-                          );
-                        })()}
+                      <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Quantity Traded Share</h3>
+                      <div className="h-72 flex flex-col items-center justify-center">
+                        <div className="w-full h-44">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={[
+                                  { name: 'Sold', value: analyticsData.kpis?.unitsSold || 0 },
+                                  { name: 'Purchased', value: analyticsData.kpis?.unitsPurchased || 0 },
+                                  { name: 'Stock', value: analyticsData.kpis?.currentStock || 0 }
+                                ]}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={45}
+                                outerRadius={65}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                <Cell fill="#10b981" />
+                                <Cell fill="#f59e0b" />
+                                <Cell fill="#3b82f6" />
+                              </Pie>
+                              <Tooltip />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="w-full space-y-2 mt-4 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Billed Sales</span>
+                            <span>{analyticsData.kpis?.unitsSold || 0}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Procurements</span>
+                            <span>{analyticsData.kpis?.unitsPurchased || 0}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500" /> Current Stock</span>
+                            <span>{analyticsData.kpis?.currentStock || 0}</span>
+                          </div>
+                        </div>
                       </div>
                     </>
                   )}
@@ -1287,103 +1206,41 @@ const Reports = () => {
                 
                 {/* Top Selling Products */}
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">Top 5 Selling Items</h3>
-                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                      {analyticsData.charts?.topProducts?.length > 0 ? `${analyticsData.charts.topProducts.length} Items` : 'Baseline: 0 Sales'}
-                    </span>
-                  </div>
+                  <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Top 5 Selling Items</h3>
                   <div className="h-64">
-                    {(() => {
-                      const hasTopProducts = analyticsData.charts?.topProducts && analyticsData.charts.topProducts.length > 0;
-                      const topSellingData = hasTopProducts
-                        ? analyticsData.charts.topProducts.slice(0, 5)
-                        : (productsList.length > 0
-                            ? productsList.slice(0, 5).map(p => ({ name: p.name, revenue: 0 }))
-                            : [
-                                { name: 'Item 1', revenue: 0 },
-                                { name: 'Item 2', revenue: 0 },
-                                { name: 'Item 3', revenue: 0 },
-                                { name: 'Item 4', revenue: 0 },
-                                { name: 'Item 5', revenue: 0 }
-                              ]
-                          );
-
-                      return (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={topSellingData} layout="vertical" margin={{ top: 10, right: 15, left: 10, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
-                            <XAxis 
-                              type="number" 
-                              domain={[0, (dataMax) => (dataMax > 0 ? 'auto' : 1000)]}
-                              tickFormatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`}
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155' }} 
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'} 
-                            />
-                            <YAxis 
-                              dataKey="name" 
-                              type="category" 
-                              width={110} 
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#F8FAFC' : '#1E293B', fontWeight: 600 }} 
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'} 
-                            />
-                            <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
-                            <Bar dataKey="revenue" fill="#3b82f6" radius={[0, 4, 4, 0]} name="Sales Revenue" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      );
-                    })()}
+                    {analyticsData.charts?.topProducts && analyticsData.charts.topProducts.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={analyticsData.charts.topProducts.slice(0, 5)} layout="vertical" margin={{ top: 10, right: 15, left: 10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
+                          <XAxis type="number" tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155' }} stroke={isDarkMode ? '#475569' : '#94A3B8'} />
+                          <YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 10, fill: isDarkMode ? '#F8FAFC' : '#1E293B', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} />
+                          <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
+                          <Bar dataKey="revenue" fill="#3b82f6" radius={[0, 4, 4, 0]} name="Sales Revenue" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-slate-400 font-semibold">No sales records found.</div>
+                    )}
                   </div>
                 </div>
 
                 {/* Top Procured Products */}
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">Top 5 Procured Items</h3>
-                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                      {analyticsData.charts?.topPurchasedProducts?.length > 0 ? `${analyticsData.charts.topPurchasedProducts.length} Items` : 'Baseline: 0 Purchases'}
-                    </span>
-                  </div>
+                  <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Top 5 Procured Items</h3>
                   <div className="h-64">
-                    {(() => {
-                      const hasPurchased = analyticsData.charts?.topPurchasedProducts && analyticsData.charts.topPurchasedProducts.length > 0;
-                      const topPurchasedData = hasPurchased
-                        ? analyticsData.charts.topPurchasedProducts.slice(0, 5)
-                        : (productsList.length > 0
-                            ? productsList.slice(0, 5).map(p => ({ name: p.name, total_expenses: 0 }))
-                            : [
-                                { name: 'Item 1', total_expenses: 0 },
-                                { name: 'Item 2', total_expenses: 0 },
-                                { name: 'Item 3', total_expenses: 0 },
-                                { name: 'Item 4', total_expenses: 0 },
-                                { name: 'Item 5', total_expenses: 0 }
-                              ]
-                          );
-
-                      return (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={topPurchasedData} layout="vertical" margin={{ top: 10, right: 15, left: 10, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
-                            <XAxis 
-                              type="number" 
-                              domain={[0, (dataMax) => (dataMax > 0 ? 'auto' : 1000)]}
-                              tickFormatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`}
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155' }} 
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'} 
-                            />
-                            <YAxis 
-                              dataKey="name" 
-                              type="category" 
-                              width={110} 
-                              tick={{ fontSize: 10, fill: isDarkMode ? '#F8FAFC' : '#1E293B', fontWeight: 600 }} 
-                              stroke={isDarkMode ? '#475569' : '#94A3B8'} 
-                            />
-                            <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
-                            <Bar dataKey="total_expenses" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Purchase Cost" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      );
-                    })()}
+                    {analyticsData.charts?.topPurchasedProducts && analyticsData.charts.topPurchasedProducts.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={analyticsData.charts.topPurchasedProducts.slice(0, 5)} layout="vertical" margin={{ top: 10, right: 15, left: 10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
+                          <XAxis type="number" tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155' }} stroke={isDarkMode ? '#475569' : '#94A3B8'} />
+                          <YAxis dataKey="name" type="category" width={110} tick={{ fontSize: 10, fill: isDarkMode ? '#F8FAFC' : '#1E293B', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} />
+                          <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
+                          <Bar dataKey="total_expenses" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Purchase Cost" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-slate-400 font-semibold">No procurement records found.</div>
+                    )}
                   </div>
                 </div>
 
@@ -1405,21 +1262,8 @@ const Reports = () => {
                             <span className="font-black text-emerald-600 dark:text-emerald-400">₹{Number(c.total_spent).toLocaleString('en-IN')}</span>
                           </div>
                         ))
-                      ) : customersList.length > 0 ? (
-                        customersList.slice(0, 2).map((c, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-xs p-2 rounded-xl bg-slate-50/70 dark:bg-slate-950/70 border border-slate-100 dark:border-slate-800">
-                            <div>
-                              <div className="font-bold text-slate-700 dark:text-slate-300">{c.name}</div>
-                              <div className="text-[10px] text-slate-400">0 Transactions (Baseline)</div>
-                            </div>
-                            <span className="font-bold text-slate-400 dark:text-slate-500">₹0.00</span>
-                          </div>
-                        ))
                       ) : (
-                        <div className="p-3 text-center rounded-xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-200 dark:border-slate-800">
-                          <p className="text-xs font-bold text-slate-500 dark:text-slate-400">0 Customer Transactions</p>
-                          <span className="text-[10px] text-slate-400 font-medium">Billed revenue starts at ₹0.00</span>
-                        </div>
+                        <div className="text-xs text-slate-400 font-medium">No customer data.</div>
                       )}
                     </div>
                   </div>
@@ -1438,21 +1282,8 @@ const Reports = () => {
                             <span className="font-black text-amber-600 dark:text-amber-400">₹{Number(v.total_procured).toLocaleString('en-IN')}</span>
                           </div>
                         ))
-                      ) : vendorsList.length > 0 ? (
-                        vendorsList.slice(0, 2).map((v, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-xs p-2 rounded-xl bg-slate-50/70 dark:bg-slate-950/70 border border-slate-100 dark:border-slate-800">
-                            <div>
-                              <div className="font-bold text-slate-700 dark:text-slate-300">{v.company_name || v.name}</div>
-                              <div className="text-[10px] text-slate-400">0 Orders (Baseline)</div>
-                            </div>
-                            <span className="font-bold text-slate-400 dark:text-slate-500">₹0.00</span>
-                          </div>
-                        ))
                       ) : (
-                        <div className="p-3 text-center rounded-xl bg-slate-50 dark:bg-slate-950 border border-dashed border-slate-200 dark:border-slate-800">
-                          <p className="text-xs font-bold text-slate-500 dark:text-slate-400">0 Supplier Orders</p>
-                          <span className="text-[10px] text-slate-400 font-medium">Procurement volume starts at ₹0.00</span>
-                        </div>
+                        <div className="text-xs text-slate-400 font-medium">No supplier data.</div>
                       )}
                     </div>
                   </div>
@@ -1495,9 +1326,7 @@ const Reports = () => {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="6" className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs font-medium">
-                            Starting baseline: 0 stock movement logs recorded yet. Inward and outward stock movements will be logged here automatically.
-                          </td>
+                          <td colSpan="6" className="py-8 text-center text-slate-450 dark:text-slate-500 text-xs font-medium">No stock movement logs found for selected filters.</td>
                         </tr>
                       )}
                     </tbody>
