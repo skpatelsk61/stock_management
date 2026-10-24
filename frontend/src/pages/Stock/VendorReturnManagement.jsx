@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowPathIcon,
@@ -11,11 +11,14 @@ import {
   PrinterIcon,
   TrashIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   MagnifyingGlassIcon,
   ClockIcon,
   BanknotesIcon,
   EyeIcon,
-  ArrowLeftIcon
+  ArrowLeftIcon,
+  XMarkIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
 import Loader from '../../components/common/Loader';
@@ -34,21 +37,28 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
   const [vendors, setVendors] = useState([]);
   const [returns, setReturns] = useState([]);
   
+  // Staged Multi-Product Return Items (Return Cart)
+  const [returnItems, setReturnItems] = useState([]);
+
   // Searchable selections
   const [searchSupplier, setSearchSupplier] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState(null);
 
   const [vendorProducts, setVendorProducts] = useState([]);
-  const [searchProduct, setSearchProduct] = useState('');
-  const [showProductDropdown, setShowProductDropdown] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+
+  // Tree Dropdown state
+  const productDropdownRef = useRef(null);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [productSearch, setProductSearch] = useState('');
 
   const [purchasesForProduct, setPurchasesForProduct] = useState([]);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [currentStock, setCurrentStock] = useState(0);
 
-  // Form inputs
+  // Line item builder inputs
   const [returnQty, setReturnQty] = useState('');
   const [returnReason, setReturnReason] = useState('Damaged');
   const [returnType, setReturnType] = useState('Refund'); // Refund, Replacement
@@ -83,6 +93,24 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
   const [updatingStatusNote, setUpdatingStatusNote] = useState(null);
   const [statusUpdateVal, setStatusUpdateVal] = useState('Pending');
   const [statusUpdateNotes, setStatusUpdateNotes] = useState('');
+
+  const getStatusBadgeClass = (status) => {
+    switch (status) {
+      case 'Sent to Vendor':
+        return 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+      case 'Vendor Accepted':
+        return 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+      case 'Replacement Received':
+        return 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800';
+      case 'Refund Received':
+        return 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800';
+      case 'Closed':
+        return 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+      case 'Pending':
+      default:
+        return 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+    }
+  };
 
   const notifyRealtimeUpdates = () => {
     window.dispatchEvent(new CustomEvent('stock-changed'));
@@ -154,13 +182,24 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
     };
   }, []);
 
+  // Close product dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (productDropdownRef.current && !productDropdownRef.current.contains(event.target)) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Fetch products purchased from selected vendor
   useEffect(() => {
     const fetchVendorProductsList = async () => {
       if (!selectedVendor) {
         setVendorProducts([]);
         setSelectedProduct(null);
-        setSearchProduct('');
+        setProductSearch('');
         return;
       }
       try {
@@ -174,6 +213,110 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
     };
     fetchVendorProductsList();
   }, [selectedVendor]);
+
+  // Group vendor products into Tree structure (Product Name (Brand) -> Variants)
+  const groupedVendorProducts = useMemo(() => {
+    const groups = {};
+    (vendorProducts || []).forEach((p) => {
+      const brandStr = (p.brand || '').trim();
+      const nameStr = (p.name || '').trim();
+      const grpKey = `${nameStr.toLowerCase()}__${brandStr.toLowerCase()}`;
+      const displayName = brandStr ? `${nameStr} (${brandStr})` : nameStr;
+
+      if (!groups[grpKey]) {
+        groups[grpKey] = {
+          key: grpKey,
+          name: nameStr,
+          brand: brandStr,
+          displayName,
+          variants: []
+        };
+      }
+      groups[grpKey].variants.push(p);
+    });
+
+    // Sort variants inside each group cleanly by weight/measurement
+    Object.values(groups).forEach((grp) => {
+      grp.variants.sort((a, b) => {
+        const numA = parseFloat(a.measurement_value) || 0;
+        const numB = parseFloat(b.measurement_value) || 0;
+        if (numA !== numB) return numA - numB;
+        return (a.measurement_value || '').localeCompare(b.measurement_value || '');
+      });
+    });
+
+    return Object.values(groups);
+  }, [vendorProducts]);
+
+  // Search filtered product groups
+  const searchedGroupedProducts = useMemo(() => {
+    if (!productSearch.trim()) return groupedVendorProducts;
+    const q = productSearch.toLowerCase().trim();
+    return groupedVendorProducts.filter((grp) => {
+      const matchGroup = grp.displayName.toLowerCase().includes(q);
+      const matchVariant = grp.variants.some(
+        (v) =>
+          (v.measurement_value && v.measurement_value.toLowerCase().includes(q)) ||
+          (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+          (v.sku && v.sku.toLowerCase().includes(q)) ||
+          v.name.toLowerCase().includes(q)
+      );
+      return matchGroup || matchVariant;
+    });
+  }, [groupedVendorProducts, productSearch]);
+
+  const toggleGroupCollapse = (key, e) => {
+    if (e) e.stopPropagation();
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleToggleAllGroups = () => {
+    const allCollapsed = groupedVendorProducts.every((g) => collapsedGroups[g.key]);
+    if (allCollapsed) {
+      setCollapsedGroups({});
+    } else {
+      const all = {};
+      groupedVendorProducts.forEach((g) => { all[g.key] = true; });
+      setCollapsedGroups(all);
+    }
+  };
+
+  // Product selection & unselection
+  const handleSelectProduct = (prod) => {
+    if (!prod || (selectedProduct && String(selectedProduct.id) === String(prod.id))) {
+      setSelectedProduct(null);
+      setPurchasesForProduct([]);
+      setSelectedPurchase(null);
+      setCurrentStock(0);
+      setReturnQty('');
+      return;
+    }
+    setSelectedProduct(prod);
+    setIsProductDropdownOpen(false);
+    setReturnQty('');
+  };
+
+  // Supplier selection safety (confirm clearing staged cart if switching supplier)
+  const handleSelectSupplier = (v) => {
+    if (selectedVendor && v && selectedVendor.id !== v.id && returnItems.length > 0) {
+      if (!window.confirm('Selecting a different supplier will clear your currently staged return items. Continue?')) {
+        setShowSupplierDropdown(false);
+        return;
+      }
+    }
+    setSelectedVendor(v);
+    setReturnItems([]);
+    setSelectedProduct(null);
+    setSelectedPurchase(null);
+    setPurchasesForProduct([]);
+    setCurrentStock(0);
+    setReturnQty('');
+    setProductSearch('');
+    setShowSupplierDropdown(false);
+  };
 
   // Fetch selected vendor ledger analytics for form metadata preview
   useEffect(() => {
@@ -243,7 +386,7 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
     fetchLedger();
   }, [selectedLedgerVendor]);
 
-  // Calculate live summary details
+  // Calculate live summary for current line builder item
   const liveSummary = useMemo(() => {
     if (!selectedProduct || !selectedPurchase || !returnQty) {
       return {
@@ -271,81 +414,197 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
     };
   }, [selectedProduct, selectedPurchase, returnQty]);
 
-  // Submit vendor return
+  // Add Item to Staged Return List (Return Cart)
+  const handleAddItem = (e) => {
+    if (e) e.preventDefault();
+    if (!selectedVendor) {
+      alert('Please select a supplier first.');
+      return;
+    }
+    if (!selectedProduct) {
+      alert('Please select a purchased product from the dropdown.');
+      return;
+    }
+    if (!selectedPurchase) {
+      alert('No purchase invoice record found for this product.');
+      return;
+    }
+    const qty = Number(returnQty);
+    if (!qty || qty <= 0) {
+      alert('Please enter a valid return quantity greater than 0.');
+      return;
+    }
+    const availableLimit = Number(selectedPurchase.availableReturnQuantity || 0);
+    if (qty > availableLimit) {
+      alert(`Validation Error: Return quantity (${qty}) exceeds the available return limit (${availableLimit} Units) for invoice ${selectedPurchase.purchaseNo}.`);
+      return;
+    }
+    if (qty > currentStock) {
+      alert(`Validation Error: Return quantity (${qty}) exceeds physical stock in hand (${currentStock} Units).`);
+      return;
+    }
+
+    const alreadyIdx = returnItems.findIndex(
+      (item) => item.product_id === selectedProduct.id && item.purchase_id === selectedPurchase.purchaseId
+    );
+    if (alreadyIdx !== -1) {
+      alert(`Product "${selectedProduct.name}" from invoice ${selectedPurchase.purchaseNo} is already in the return list. If you need to change quantity, please remove it from the table below and re-add.`);
+      return;
+    }
+
+    const rate = Number(selectedPurchase.purchasePrice || 0);
+    const gstPct = Number(selectedPurchase.gst || 0);
+    const lineTotal = rate * qty;
+    const lineGst = lineTotal * (gstPct / 100);
+    const totalAmount = lineTotal + lineGst;
+
+    const newItem = {
+      tempId: `${selectedProduct.id}_${selectedPurchase.purchaseId || Date.now()}_${Math.random()}`,
+      product_id: Number(selectedProduct.id),
+      product_name: selectedProduct.name,
+      brand: selectedProduct.brand || '',
+      measurement_value: selectedProduct.measurement_value || selectedProduct.unit || '',
+      sku: selectedProduct.sku || '',
+      barcode: selectedProduct.barcode || '',
+      purchase_id: selectedPurchase.purchaseId,
+      purchase_no: selectedPurchase.purchaseNo,
+      purchase_date: selectedPurchase.purchaseDate,
+      batch_number: selectedPurchase.batchNo || selectedPurchase.batch_no || selectedPurchase.purchaseNo || '—',
+      expiry_date: selectedPurchase.expiryDate || null,
+      quantity: qty,
+      return_price: rate,
+      gst: gstPct,
+      line_total: lineTotal,
+      gst_amount: lineGst,
+      total_amount: totalAmount,
+      reason: returnReason,
+      return_type: returnType,
+      available_limit: availableLimit,
+      current_stock: currentStock
+    };
+
+    setReturnItems((prev) => [...prev, newItem]);
+    // Reset product selection for next item
+    setSelectedProduct(null);
+    setSelectedPurchase(null);
+    setPurchasesForProduct([]);
+    setReturnQty('');
+    setCurrentStock(0);
+    setProductSearch('');
+  };
+
+  const handleRemoveItem = (tempId) => {
+    setReturnItems((prev) => prev.filter((item) => item.tempId !== tempId));
+  };
+
+  // Aggregate Staged Summary across all items in Return Note
+  const stagedSummary = useMemo(() => {
+    const totalUnits = returnItems.reduce((acc, item) => acc + Number(item.quantity || 0), 0);
+    const subtotal = returnItems.reduce((acc, item) => acc + Number(item.line_total || 0), 0);
+    const totalGst = returnItems.reduce((acc, item) => acc + Number(item.gst_amount || 0), 0);
+    const grandTotal = returnItems.reduce((acc, item) => acc + Number(item.total_amount || 0), 0);
+    return {
+      itemCount: returnItems.length,
+      totalUnits,
+      subtotal,
+      totalGst,
+      grandTotal
+    };
+  }, [returnItems]);
+
+  // Submit Multi-Product Vendor Return Note
   const handleSubmitReturn = async (e) => {
-    e.preventDefault();
-    if (!selectedVendor || !selectedProduct || !returnQty || !returnReason) {
-      alert('Please fill out all required fields.');
+    if (e) e.preventDefault();
+    if (!selectedVendor) {
+      alert('Please select a supplier first.');
       return;
     }
 
-    // 1. Validate that the selected product belongs to the selected supplier
-    const productBelongsToVendor = vendorProducts.some((p) => Number(p.id) === Number(selectedProduct.id));
-    if (!productBelongsToVendor) {
-      alert('Validation Error: Selected product does not belong to the selected supplier.');
-      return;
+    let itemsToSubmit = [...returnItems];
+
+    // If user filled the line builder but forgot to click "+ Add Item", auto-stage if valid:
+    if (itemsToSubmit.length === 0 && selectedProduct && returnQty) {
+      const qty = Number(returnQty);
+      const availableLimit = Number(selectedPurchase?.availableReturnQuantity || 0);
+      if (qty > 0 && qty <= availableLimit && qty <= currentStock) {
+        const rate = Number(selectedPurchase?.purchasePrice || 0);
+        const gstPct = Number(selectedPurchase?.gst || 0);
+        const lineTotal = rate * qty;
+        const lineGst = lineTotal * (gstPct / 100);
+        itemsToSubmit.push({
+          product_id: Number(selectedProduct.id),
+          quantity: qty,
+          return_price: rate,
+          purchase_id: selectedPurchase?.purchaseId || null,
+          purchase_no: selectedPurchase?.purchaseNo || null,
+          batch_number: selectedPurchase?.batchNo || selectedPurchase?.purchaseNo || '—',
+          expiry_date: selectedPurchase?.expiryDate || null,
+          reason: returnReason,
+          return_type: returnType,
+          line_total: lineTotal,
+          gst_amount: lineGst,
+          total_amount: lineTotal + lineGst
+        });
+      }
     }
 
-    // 2. Validate return quantity constraints
-    const availableLimit = Number(selectedPurchase?.availableReturnQuantity || 0);
-    if (Number(returnQty) > availableLimit) {
-      alert(`Validation Error: Return quantity (${returnQty}) cannot be greater than the available return limit (${availableLimit} Units) from this purchase invoice.`);
+    if (itemsToSubmit.length === 0) {
+      alert('Please add at least one product using "＋ Add Item to Return Note" before recording the return.');
       return;
     }
-
-    // 3. Batch selection verify
-    const purchaseBatch = selectedPurchase?.batchNo || selectedPurchase?.batch_number || selectedPurchase?.purchaseNo || '—';
 
     setProcessing(true);
     try {
       const payload = {
-        purchase_id: selectedPurchase?.purchaseId || null,
         vendor_id: Number(selectedVendor.id),
-        product_id: Number(selectedProduct.id),
-        quantity: Number(returnQty),
-        reason: returnReason,
-        return_type: returnType,
+        items: itemsToSubmit.map((i) => ({
+          product_id: Number(i.product_id),
+          quantity: Number(i.quantity),
+          return_price: Number(i.return_price),
+          purchase_id: i.purchase_id || null,
+          purchase_no: i.purchase_no || null,
+          batch_number: i.batch_number || null,
+          expiry_date: i.expiry_date || null,
+          reason: i.reason || returnReason,
+          return_type: i.return_type || returnType
+        })),
+        reason: itemsToSubmit[0]?.reason || returnReason,
+        return_type: itemsToSubmit[0]?.return_type || returnType,
         remarks,
-        image_url: imageUrl,
-        batch_number: purchaseBatch,
-        expiry_date: selectedPurchase?.expiryDate || null
+        image_url: imageUrl
       };
 
-      console.log('[VendorReturn] Submitting payload:', payload);
+      console.log('[VendorReturn] Submitting multi-product payload:', payload);
 
       const res = await vendorReturnsAPI.create(payload);
       if (res.success) {
-        alert(`✅ Vendor Return Note processed successfully!\nNote No: ${res.vrn}\nTotal Refund: ₹${Number(res.totalAmount || 0).toFixed(2)}`);
-        // Reset form inputs
+        alert(`✅ Multi-Product Vendor Return Note recorded successfully!\n\nVRN No: ${res.vrn}\nTotal Products: ${itemsToSubmit.length}\nTotal Units: ${itemsToSubmit.reduce((acc, i) => acc + Number(i.quantity), 0)}\nTotal Refund: ₹${Number(res.totalAmount || 0).toFixed(2)}`);
+        // Reset state
+        setReturnItems([]);
+        setSelectedProduct(null);
+        setSelectedPurchase(null);
+        setPurchasesForProduct([]);
         setReturnQty('');
         setRemarks('');
         setImageUrl('');
-        setSelectedProduct(null);
-        setSearchProduct('');
-        // Reload data
+        setProductSearch('');
+        // Reload history
         await fetchReturnNotes();
         const vendRes = await vendorsAPI.getAll();
         if (vendRes.success) setVendors(vendRes.vendors);
         notifyRealtimeUpdates();
       } else {
-        // Server returned success: false with a message
         const serverMsg = res.message || 'Vendor return processing failed. Please try again.';
         console.error('[VendorReturn] Server returned failure:', res);
         alert(`❌ Return Failed:\n${serverMsg}`);
       }
     } catch (err) {
-      // Extract the real error from the API response if available
       const serverError =
         err?.response?.data?.message ||
         err?.response?.data?.error ||
         err?.message ||
         'An unexpected error occurred while processing the supplier return.';
-      console.error('[VendorReturn] Error details:', {
-        status: err?.response?.status,
-        statusText: err?.response?.statusText,
-        data: err?.response?.data,
-        message: err?.message
-      });
+      console.error('[VendorReturn] Error details:', err);
       alert(`❌ Error processing supplier return note:\n\n${serverError}`);
     } finally {
       setProcessing(false);
@@ -397,10 +656,14 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
   // Print Return Note Layout
   const handlePrintReturnNote = (note) => {
     const win = window.open('', '_blank');
-    const itemsValue = Number(note.quantity) * Number(note.return_price);
+    const printItems = note.items && note.items.length > 0
+      ? note.items
+      : ((returns || []).filter((r) => r.return_no === note.return_no) || [note]);
+
+    const itemsValue = printItems.reduce((acc, it) => acc + (Number(it.quantity || 0) * Number(it.return_price || 0)), 0);
     const gstPct = note.gst || 18;
-    const gstAmount = itemsValue * (gstPct / 100);
-    const grandTotal = itemsValue + gstAmount;
+    const gstAmount = printItems.reduce((acc, it) => acc + ((Number(it.quantity || 0) * Number(it.return_price || 0)) * ((it.gst || gstPct) / 100)), 0);
+    const grandTotal = Number(note.total_amount || (itemsValue + gstAmount));
 
     win.document.write(`
       <html>
@@ -473,8 +736,8 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
               <span class="banner-val">${new Date(note.created_at).toLocaleDateString('en-IN')}</span>
             </div>
             <div class="banner-col">
-              <span class="banner-lbl">Purchase Invoice Ref</span>
-              <span class="banner-val" style="font-family: monospace;">${note.purchase_no || 'N/A'}</span>
+              <span class="banner-lbl">Total Items Returned</span>
+              <span class="banner-val">${printItems.length} Products (${printItems.reduce((acc, it) => acc + Number(it.quantity || 0), 0)} Units)</span>
             </div>
             <div class="banner-col">
               <span class="banner-lbl">Workflow Status</span>
@@ -494,9 +757,9 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
             <div class="details-box">
               <div class="details-title">Return Parameters</div>
               <div class="details-row">Settlement Type: <span>${note.return_type || 'Refund'}</span></div>
-              <div class="details-row">Return Reason: <span style="color: #b45309;">${note.reason}</span></div>
-              <div class="details-row">Batch Number: <span>${note.batch_number || note.batch_no || note.purchase_no || '—'}</span></div>
-              <div class="details-row">Expiry Date: <span>${note.expiry_date ? new Date(note.expiry_date).toLocaleDateString('en-IN') : 'N/A'}</span></div>
+              <div class="details-row">Primary Reason: <span style="color: #b45309;">${note.reason}</span></div>
+              <div class="details-row">Purchase Invoice: <span>${note.purchase_no || 'Multi-Invoice'}</span></div>
+              <div class="details-row">Batch Number: <span>${note.batch_number || note.batch_no || '—'}</span></div>
             </div>
           </div>
           
@@ -504,23 +767,31 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
             <thead>
               <tr>
                 <th style="width: 5%; text-align: center;">Sr. No.</th>
-                <th style="width: 50%; text-align: left;">Product Description</th>
-                <th style="width: 15%; text-align: center;">Returned Qty</th>
-                <th style="width: 15%; text-align: right;">Purchase Rate</th>
-                <th style="width: 15%; text-align: right;">Total Amount</th>
+                <th style="width: 45%; text-align: left;">Product Description</th>
+                <th style="width: 15%; text-align: left;">Invoice / Batch</th>
+                <th style="width: 10%; text-align: center;">Returned Qty</th>
+                <th style="width: 12%; text-align: right;">Unit Rate</th>
+                <th style="width: 13%; text-align: right;">Total Amount</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td style="text-align: center;">1</td>
-                <td>
-                  <div style="font-weight: bold; color: #0f172a;">${note.product_name}</div>
-                  ${note.barcode ? `<div style="font-size: 8px; color: #64748b; font-family: monospace; margin-top: 2px;">Barcode: ${note.barcode}</div>` : ''}
-                </td>
-                <td style="text-align: center; font-weight: 700;">${note.quantity} Pcs</td>
-                <td style="text-align: right;">₹${Number(note.return_price).toFixed(2)}</td>
-                <td style="text-align: right; font-weight: 900; color: #0f172a;">₹${Number(note.total_amount).toFixed(2)}</td>
-              </tr>
+              ${printItems.map((item, idx) => `
+                <tr>
+                  <td style="text-align: center;">${idx + 1}</td>
+                  <td>
+                    <div style="font-weight: bold; color: #0f172a;">${item.product_name}</div>
+                    ${item.barcode ? `<div style="font-size: 8px; color: #64748b; font-family: monospace;">Barcode: ${item.barcode}</div>` : ''}
+                    <div style="font-size: 8px; color: #b45309;">Reason: ${item.reason} (${item.return_type || 'Refund'})</div>
+                  </td>
+                  <td>
+                    <div style="font-family: monospace; font-weight: 600;">${item.purchase_no || '—'}</div>
+                    <div style="font-size: 8px; color: #64748b; font-family: monospace;">Batch: ${item.batch_number || item.batch_no || '—'}</div>
+                  </td>
+                  <td style="text-align: center; font-weight: 700;">${item.quantity} Pcs</td>
+                  <td style="text-align: right;">₹${Number(item.return_price).toFixed(2)}</td>
+                  <td style="text-align: right; font-weight: 900; color: #0f172a;">₹${Number(item.total_amount).toFixed(2)}</td>
+                </tr>
+              `).join('')}
             </tbody>
           </table>
           
@@ -701,14 +972,7 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
     );
   }, [vendors, searchSupplier]);
 
-  // Search filter for Product Select box in form
-  const filteredProductsForForm = useMemo(() => {
-    if (!searchProduct.trim()) return vendorProducts;
-    return vendorProducts.filter(p =>
-      p.name?.toLowerCase().includes(searchProduct.toLowerCase()) ||
-      p.sku?.toLowerCase().includes(searchProduct.toLowerCase())
-    );
-  }, [vendorProducts, searchProduct]);
+
 
   // Unified Dashboard Metrics (Task-2 summary cards)
   const dashboardStats = useMemo(() => {
@@ -731,9 +995,13 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
   // Tab 2 History Filtering
   const processedReturnsHistory = useMemo(() => {
     return returns.filter(r => {
-      const matchSearch = searchQuery.trim() === '' ||
-        r.return_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        r.product_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch = q === '' ||
+        r.return_no?.toLowerCase().includes(q) ||
+        r.product_name?.toLowerCase().includes(q) ||
+        r.vendor_company_name?.toLowerCase().includes(q) ||
+        r.vendor_name?.toLowerCase().includes(q) ||
+        (r.items && r.items.some(it => it.product_name?.toLowerCase().includes(q)));
       
       const matchSupplier = filterSupplier === 'All' || String(r.vendor_id) === filterSupplier;
       const matchStatus = filterStatus === 'All' || r.status === filterStatus;
@@ -823,283 +1091,704 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
       
       {activeTab === 'process' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* FORM CONTAINER (LEFT) */}
+          {/* MAIN FORM & STAGING CONTAINER (LEFT) */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm lg:col-span-2 space-y-6">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Record Vendor Stock Return</h2>
-              <p className="text-xs text-slate-400 dark:text-slate-400 font-medium">Reverts inventory levels and reduces outstanding supplier balances dynamically</p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>↩️</span> Multi-Product Vendor Return Note
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  Select supplier, add multiple purchased products to the return list, and record in a single return note.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  <span>{returnItems.length}</span> Products Staged
+                </span>
+              </div>
             </div>
-            
-            <form onSubmit={handleSubmitReturn} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                
-                {/* Searchable Vendor Selector */}
-                <div className="relative">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Search & Select Supplier</label>
-                  <div
-                    className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold cursor-pointer text-slate-900 dark:text-white"
-                    onClick={() => setShowSupplierDropdown(!showSupplierDropdown)}
-                  >
-                    <span>{selectedVendor ? `${selectedVendor.company_name} (${selectedVendor.name})` : '-- Select Vendor --'}</span>
-                    <ChevronDownIcon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+
+            {/* SUPPLIER SELECTOR */}
+            <div className="relative">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                1. Select Supplier <span className="text-rose-500">*</span>
+              </label>
+              <div
+                className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold cursor-pointer text-slate-900 dark:text-white hover:border-indigo-400 transition-colors"
+                onClick={() => setShowSupplierDropdown(!showSupplierDropdown)}
+              >
+                <span>{selectedVendor ? `${selectedVendor.company_name} (${selectedVendor.name})` : '-- Select Supplier to Begin --'}</span>
+                <ChevronDownIcon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              </div>
+
+              {showSupplierDropdown && (
+                <div className="absolute z-30 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl mt-1.5 p-2 space-y-2 max-h-[240px] overflow-y-auto custom-scrollbar">
+                  <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-750 rounded-lg px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800">
+                    <MagnifyingGlassIcon className="w-4 h-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchSupplier}
+                      onChange={(e) => setSearchSupplier(e.target.value)}
+                      placeholder="Search supplier by name or company..."
+                      className="w-full bg-transparent border-none text-xs focus:outline-none font-semibold text-slate-900 dark:text-white placeholder:text-slate-400"
+                    />
+                    {searchSupplier && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchSupplier('')}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        <XMarkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                  {showSupplierDropdown && (
-                    <div className="absolute z-20 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl mt-1 p-2 space-y-2 max-h-[220px] overflow-y-auto">
-                      <div className="flex items-center gap-2 border border-slate-100 dark:border-slate-800 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800">
-                        <MagnifyingGlassIcon className="w-4 h-4 text-slate-400 dark:text-slate-400" />
-                        <input
-                          type="text"
-                          value={searchSupplier}
-                          onChange={(e) => setSearchSupplier(e.target.value)}
-                          placeholder="Search supplier..."
-                          className="w-full bg-transparent border-none text-xs focus:outline-none py-1 font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                        />
+                  <div className="space-y-1">
+                    {filteredSuppliersForForm.map((v, idx) => (
+                      <div
+                        key={`v-form-${v.id}-${idx}`}
+                        onClick={() => handleSelectSupplier(v)}
+                        className={`text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-slate-800 p-2.5 rounded-lg cursor-pointer flex justify-between items-center transition-colors ${
+                          selectedVendor?.id === v.id ? 'bg-indigo-50/80 dark:bg-slate-800 text-indigo-900 dark:text-indigo-200 font-bold' : 'text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-bold">{v.company_name}</span>
+                          <span className="text-[11px] text-slate-400 ml-1.5">({v.name})</span>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-750 text-slate-600 dark:text-slate-300">
+                          Bal: ₹{Number(v.outstanding_balance || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </span>
                       </div>
-                      <div className="space-y-1">
-                        {filteredSuppliersForForm.map((v, idx) => (
-                          <div
-                            key={`v-form-${v.id}-${idx}`}
-                            onClick={() => {
-                              setSelectedVendor(v);
-                              setSelectedProduct(null);
-                              setShowSupplierDropdown(false);
-                            }}
-                            className="text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white p-2 rounded-lg cursor-pointer flex justify-between"
-                          >
-                            <span>{v.company_name} ({v.name})</span>
-                            <span className="text-[10px] text-slate-400 dark:text-slate-400">Bal: ₹{Number(v.outstanding_balance).toFixed(0)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* Dynamic Vendor Information Preview */}
-                  {selectedVendor && (
-                    <div className="mt-2 bg-indigo-50/50 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-700 rounded-xl p-3 text-[10px] text-indigo-900 dark:text-indigo-300 font-bold space-y-1">
-                      <div>GSTIN: <span className="font-mono text-slate-800 dark:text-white">{selectedVendor.gstin || '—'}</span></div>
-                      <div>Mobile: <span className="font-mono text-slate-800 dark:text-white">{selectedVendor.phone}</span></div>
-                      <div>Outstanding Balance: <span className="text-slate-850 dark:text-white">₹{Number(selectedVendor.outstanding_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></div>
-                      <div>Total Purchases: <span className="text-slate-850 dark:text-white font-black">₹{Number(formVendorAnalytics?.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Dynamic Vendor Information Preview */}
+              {selectedVendor && (
+                <div className="mt-2.5 bg-indigo-50/60 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-750 rounded-xl p-3 text-xs text-slate-700 dark:text-slate-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">GSTIN</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedVendor.gstin || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Phone</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedVendor.phone || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Outstanding</span>
+                    <span className="font-bold text-rose-600 dark:text-rose-400 font-mono">₹{Number(selectedVendor.outstanding_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Total Purchases</span>
+                    <span className="font-bold text-indigo-700 dark:text-indigo-300 font-mono">₹{Number(formVendorAnalytics?.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PRODUCT LINE BUILDER BOX */}
+            <div className={`border rounded-2xl p-5 space-y-4 transition-all ${
+              selectedVendor
+                ? 'bg-slate-50/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800'
+                : 'opacity-60 pointer-events-none bg-slate-100 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800'
+            }`}>
+              <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 pb-2">
+                <span className="text-xs font-black uppercase text-indigo-700 dark:text-indigo-400 tracking-wider flex items-center gap-1.5">
+                  <span>🛒</span> 2. Select & Configure Return Item (Purchased From {selectedVendor ? selectedVendor.company_name : 'Supplier'})
+                </span>
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  {vendorProducts.length} Returnable Products Available
+                </span>
+              </div>
+
+              {/* Searchable Product Tree Dropdown */}
+              <div className="relative" ref={productDropdownRef}>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                  Product Tree Selection <span className="text-rose-500">*</span>
+                </label>
+
+                {/* Tree Dropdown Trigger Button */}
+                <div
+                  onClick={() => selectedVendor && setIsProductDropdownOpen(!isProductDropdownOpen)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    selectedVendor
+                      ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white shadow-2xs hover:border-indigo-400'
+                      : 'bg-slate-100 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    {selectedProduct ? (
+                      <span className="font-extrabold text-indigo-700 dark:text-indigo-300 truncate">
+                        {selectedProduct.name} {selectedProduct.brand ? `(${selectedProduct.brand})` : ''} - {selectedProduct.measurement_value || selectedProduct.unit}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 font-semibold">
+                        -- Select Purchased Product (Tree View) --
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {selectedProduct && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectProduct(null);
+                        }}
+                        className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                        title="Unselect Product"
+                      >
+                        <XMarkIcon className="w-4 h-4" />
+                      </span>
+                    )}
+                    <ChevronDownIcon
+                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
+                        isProductDropdownOpen ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''
+                      }`}
+                    />
+                  </div>
                 </div>
 
-                {/* Searchable Product Selector */}
-                <div className="relative">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Select Purchased Product</label>
-                  <div
-                    className={`flex justify-between items-center border rounded-xl px-3 py-2 text-xs font-bold cursor-pointer ${
-                      selectedVendor 
-                        ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white' 
-                        : 'bg-slate-100 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 pointer-events-none'
-                    }`}
-                    onClick={() => setShowProductDropdown(!showProductDropdown)}
-                  >
-                    <span>{selectedProduct ? `${selectedProduct.name}` : '-- Select Product --'}</span>
-                    <ChevronDownIcon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                  </div>
-                  {showProductDropdown && (
-                    <div className="absolute z-20 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl mt-1 p-2 space-y-2 max-h-[220px] overflow-y-auto">
-                      <div className="flex items-center gap-2 border border-slate-100 dark:border-slate-800 rounded-lg px-2 py-1 bg-slate-50 dark:bg-slate-800">
-                        <MagnifyingGlassIcon className="w-4 h-4 text-slate-400 dark:text-slate-400" />
+                {/* Tree Dropdown Popover */}
+                {isProductDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
+                    {/* Search & Collapse Controls */}
+                    <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/40 space-y-2">
+                      <div className="relative">
+                        <MagnifyingGlassIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          value={searchProduct}
-                          onChange={(e) => setSearchProduct(e.target.value)}
-                          placeholder="Search product..."
-                          className="w-full bg-transparent border-none text-xs focus:outline-none py-1 font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                          value={productSearch}
+                          onChange={(e) => setProductSearch(e.target.value)}
+                          placeholder="Search product name, brand or weight..."
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded-lg pl-8 pr-8 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
                         />
-                      </div>
-                      <div className="space-y-1">
-                        {filteredProductsForForm.map((p, idx) => (
-                          <div
-                            key={`p-form-${p.id}-${idx}`}
-                            onClick={() => {
-                              setSelectedProduct(p);
-                              setShowProductDropdown(false);
-                            }}
-                            className="text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white p-2 rounded-lg cursor-pointer"
+                        {productSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setProductSearch('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                           >
-                            {p.name} ({p.sku})
-                          </div>
-                        ))}
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-1">
+                        <span>
+                          {searchedGroupedProducts.length} Product Group{searchedGroupedProducts.length === 1 ? '' : 's'} Purchased
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleToggleAllGroups}
+                          className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                        >
+                          {groupedVendorProducts.every((g) => collapsedGroups[g.key]) ? 'Expand All' : 'Collapse All'}
+                        </button>
                       </div>
                     </div>
-                  )}
 
-                  {/* Multi Purchase Invoice Select Dropdown */}
-                  {selectedProduct && purchasesForProduct.length > 1 && (
-                    <div className="mt-2.5">
-                      <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Select Purchase Invoice Reference</label>
+                    {/* Selected Product Banner with Unselect Action */}
+                    {selectedProduct && (
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900 text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[10px] uppercase font-extrabold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 rounded shrink-0">
+                            Selected
+                          </span>
+                          <span className="font-extrabold text-indigo-950 dark:text-indigo-100 truncate">
+                            {selectedProduct.name} {selectedProduct.brand ? `(${selectedProduct.brand})` : ''} - {selectedProduct.measurement_value || selectedProduct.unit}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectProduct(null)}
+                          className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-600 hover:text-rose-800 dark:text-rose-300 bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-800 px-2 py-0.5 rounded-md cursor-pointer transition-colors shrink-0 ml-2"
+                        >
+                          <XMarkIcon className="w-3.5 h-3.5" />
+                          Unselect
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Scrollable Tree List with scrollbar */}
+                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar p-2 space-y-1.5">
+                      {searchedGroupedProducts.length === 0 ? (
+                        <div className="py-8 text-center text-slate-400 dark:text-slate-500 font-medium text-xs">
+                          {vendorProducts.length === 0
+                            ? 'No products have been purchased from this supplier yet.'
+                            : 'No matching products found.'}
+                        </div>
+                      ) : (
+                        searchedGroupedProducts.map((grp) => {
+                          const isCollapsed = Boolean(collapsedGroups[grp.key]);
+                          const hasSelectedVariant = grp.variants.some((v) => String(v.id) === String(selectedProduct?.id));
+
+                          return (
+                            <div
+                              key={grp.key}
+                              className={`border rounded-xl overflow-hidden transition-colors ${
+                                hasSelectedVariant
+                                  ? 'border-indigo-300 dark:border-indigo-700 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-xs'
+                                  : 'border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs'
+                              }`}
+                            >
+                              {/* Parent Product Group Header (Clickable open/close toggle) */}
+                              <div
+                                onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                className={`flex items-center justify-between px-3 py-2 text-xs font-bold cursor-pointer transition-colors ${
+                                  isCollapsed
+                                    ? 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200'
+                                    : 'bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-50/70 text-indigo-950 dark:text-indigo-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                    className="p-1 rounded-md text-slate-500 hover:text-indigo-700 dark:hover:text-indigo-400 hover:bg-indigo-100/60 dark:hover:bg-indigo-950/40 transition-colors"
+                                    title={isCollapsed ? 'Open (Expand)' : 'Close (Collapse)'}
+                                  >
+                                    {isCollapsed ? (
+                                      <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    ) : (
+                                      <ChevronDownIcon className="w-3.5 h-3.5 stroke-[2.5] text-indigo-600 dark:text-indigo-400" />
+                                    )}
+                                  </button>
+
+                                  <span className="font-extrabold text-slate-900 dark:text-white tracking-tight truncate">
+                                    {grp.displayName}
+                                  </span>
+
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100/70 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                                    {grp.variants.length} {grp.variants.length === 1 ? 'Weight' : 'Weights'}
+                                  </span>
+
+                                  {hasSelectedVariant && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0">
+                                      Selected
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0 text-slate-400 dark:text-slate-500 text-[11px] font-semibold">
+                                  <span>{isCollapsed ? 'Open' : 'Close'}</span>
+                                </div>
+                              </div>
+
+                              {/* Child Variants */}
+                              {!isCollapsed && (
+                                <div className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                                  {grp.variants.map((v) => {
+                                    const isSelected = String(selectedProduct?.id) === String(v.id);
+                                    const stockQty = Number(v.current_stock || 0);
+                                    const purchasedQty = Number(v.total_purchased_from_vendor || 0);
+
+                                    return (
+                                      <div
+                                        key={v.id}
+                                        onClick={() => handleSelectProduct(v)}
+                                        className={`flex items-center justify-between px-3 py-2 pl-7 text-xs font-semibold cursor-pointer transition-colors ${
+                                          isSelected
+                                            ? 'bg-indigo-600 text-white font-bold'
+                                            : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-slate-400 font-mono text-xs select-none">↳</span>
+                                          <span className="font-bold">
+                                            {grp.name} {grp.brand ? `(${grp.brand})` : ''} - {v.measurement_value || v.unit || 'Standard'}
+                                          </span>
+                                          {v.sku && (
+                                            <span className={`text-[10px] font-mono ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
+                                              ({v.sku})
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-2 text-[11px]">
+                                          <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                            stockQty > 0
+                                              ? isSelected ? 'bg-indigo-700 text-white' : 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                              : isSelected ? 'bg-rose-700 text-white' : 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                                          }`}>
+                                            Stock: {stockQty} Pcs
+                                          </span>
+                                          <span className={`text-[10px] font-mono ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                            Bought: {purchasedQty}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Purchase Invoice Reference Details (When product selected) */}
+              {selectedProduct && (
+                <div className="space-y-3">
+                  {purchasesForProduct.length > 1 && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                        Select Purchase Invoice Reference ({purchasesForProduct.length} Available)
+                      </label>
                       <select
                         value={selectedPurchase?.purchaseId || ''}
                         onChange={(e) => {
-                          const found = purchasesForProduct.find(p => p.purchaseId === Number(e.target.value));
+                          const found = purchasesForProduct.find((p) => p.purchaseId === Number(e.target.value));
                           if (found) setSelectedPurchase(found);
                         }}
-                        className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       >
                         {purchasesForProduct.map((p, idx) => (
-                          <option key={`pur-ref-${p.purchaseId || p.id}-${p.batchNo || idx}`} value={p.purchaseId} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
-                            {p.purchaseNo} ({new Date(p.purchaseDate).toLocaleDateString('en-IN')}) - Qty: {p.purchaseQuantity} (Avail: {p.availableReturnQuantity})
+                          <option key={`pur-ref-${p.purchaseId || p.id}-${p.batchNo || idx}`} value={p.purchaseId}>
+                            {p.purchaseNo} ({new Date(p.purchaseDate).toLocaleDateString('en-IN')}) • Qty: {p.purchaseQuantity} • Avail Return: {p.availableReturnQuantity} Pcs
                           </option>
                         ))}
                       </select>
                     </div>
                   )}
 
-                  {/* Dynamic Product Metadata Fields */}
-                  {selectedProduct && selectedPurchase && (
-                    <div className="mt-2 bg-indigo-50/50 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-700 rounded-xl p-3 text-[10px] text-indigo-900 dark:text-indigo-300 font-bold space-y-1.5">
-                      <div>Purchase Invoice: <span className="font-mono text-slate-800 dark:text-white">{selectedPurchase.purchaseNo}</span></div>
-                      <div>Batch Number: <span className="font-mono text-slate-800 dark:text-white">{selectedPurchase.batchNo || selectedPurchase.batch_no || selectedPurchase.purchaseNo || '—'}</span></div>
-                      <div>Purchase Date: <span className="text-slate-800 dark:text-white">{new Date(selectedPurchase.purchaseDate).toLocaleDateString('en-IN')}</span></div>
-                      <div>Purchase Quantity: <span className="text-slate-800 dark:text-white">{selectedPurchase.purchaseQuantity} Pcs</span></div>
-                      <div>Already Returned Qty: <span className="text-slate-800 dark:text-white">{selectedPurchase.returnedQuantity} Pcs</span></div>
-                      <div>Available Return Qty: <span className="text-emerald-700 dark:text-emerald-400 font-extrabold">{selectedPurchase.availableReturnQuantity} Pcs</span></div>
-                      <div>Purchase Rate: <span className="font-mono text-slate-800 dark:text-white">₹{Number(selectedPurchase.purchasePrice).toFixed(2)}</span></div>
-                      <div>GST %: <span className="text-slate-800 dark:text-white">{selectedPurchase.gst || 0}%</span></div>
-                      <div>Expiry Date: <span className="text-slate-800 dark:text-white">{selectedPurchase.expiryDate ? new Date(selectedPurchase.expiryDate).toLocaleDateString('en-IN') : 'N/A'}</span></div>
-                      <div>Current Stock: <span className="text-slate-850 dark:text-white font-black">{currentStock} Pcs</span></div>
+                  {selectedPurchase ? (
+                    <div className="bg-indigo-50/70 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-700 rounded-xl p-3 text-xs text-indigo-950 dark:text-indigo-200 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Invoice Number</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedPurchase.purchaseNo}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Batch Number</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedPurchase.batchNo || selectedPurchase.batch_no || selectedPurchase.purchaseNo || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Purchase Date</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{new Date(selectedPurchase.purchaseDate).toLocaleDateString('en-IN')}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Purchase Rate</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">₹{Number(selectedPurchase.purchasePrice || 0).toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Purchased Qty</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{selectedPurchase.purchaseQuantity} Pcs</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Already Returned</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{selectedPurchase.returnedQuantity || 0} Pcs</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400 block">Avail Return Limit</span>
+                        <span className="font-extrabold text-emerald-700 dark:text-emerald-300 font-mono">{selectedPurchase.availableReturnQuantity} Pcs</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400 block">Current Shop Stock</span>
+                        <span className="font-black text-amber-700 dark:text-amber-300 font-mono">{currentStock} Pcs</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 text-center text-xs text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200">
+                      No purchase records found for this product under the selected supplier.
                     </div>
                   )}
                 </div>
+              )}
 
-                {/* Return Type Selector */}
+              {/* Line Configuration Controls */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Return Action Settlement</label>
-                  <select
-                    value={returnType}
-                    onChange={(e) => setReturnType(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="Refund" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Refund / Store Credit</option>
-                    <option value="Replacement" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Replacement Item Pending</option>
-                  </select>
-                </div>
-
-                {/* Reason Selector */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Reason for Return</label>
-                  <select
-                    value={returnReason}
-                    onChange={(e) => setReturnReason(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="Damaged" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Damaged Batch</option>
-                    <option value="Expired" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Expired Stock</option>
-                    <option value="Defective" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Defective Product</option>
-                    <option value="Overstock" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Overstock Return</option>
-                    <option value="Wrong Item" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Wrong Items Delivered</option>
-                  </select>
-                </div>
-
-                {/* Quantity Input */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Return Quantity</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                    Return Quantity <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="number"
                     min="1"
-                    required
+                    max={selectedPurchase?.availableReturnQuantity || currentStock || 99999}
                     value={returnQty}
                     onChange={(e) => setReturnQty(e.target.value)}
-                    placeholder="Enter quantity to return..."
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                    placeholder="e.g. 5"
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
 
-                {/* Image Upload Mock Input */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Upload Damaged Product Image (URL)</label>
-                  <input
-                    type="text"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="Paste image URL (Optional)..."
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                  />
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                    Reason for Return
+                  </label>
+                  <select
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="Damaged">Damaged Batch</option>
+                    <option value="Expired">Expired Stock</option>
+                    <option value="Defective">Defective Product</option>
+                    <option value="Overstock">Overstock Return</option>
+                    <option value="Wrong Item">Wrong Items Delivered</option>
+                  </select>
                 </div>
 
-                {/* Remarks textarea */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Internal Audit Remarks</label>
-                  <textarea
-                    rows="2"
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="Explain return details for accounting checks..."
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-medium bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                  />
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                    Settlement Type
+                  </label>
+                  <select
+                    value={returnType}
+                    onChange={(e) => setReturnType(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="Refund">Refund / Store Credit</option>
+                    <option value="Replacement">Replacement Pending</option>
+                  </select>
                 </div>
-
               </div>
 
-              <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800">
+              {/* Line Add Action Button */}
+              <div className="flex justify-between items-center pt-2">
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  {selectedProduct && selectedPurchase && returnQty && Number(returnQty) > 0 ? (
+                    <span>
+                      Item Refund: <strong className="text-slate-900 dark:text-white font-mono">₹{liveSummary.totalRefund.toFixed(2)}</strong> (Rate: ₹{liveSummary.purchaseRate.toFixed(2)} × {returnQty})
+                    </span>
+                  ) : (
+                    <span>Choose product & quantity to add into the return note</span>
+                  )}
+                </div>
+
                 <button
-                  type="submit"
-                  disabled={processing || isReadOnly || !selectedProduct || !returnQty || Number(returnQty) > Number(selectedPurchase?.availableReturnQuantity || 0)}
-                  className="px-6 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 transition-all active:scale-95 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 disabled:shadow-none cursor-pointer"
+                  type="button"
+                  onClick={handleAddItem}
+                  disabled={!selectedProduct || !selectedPurchase || !returnQty || Number(returnQty) <= 0 || Number(returnQty) > Number(selectedPurchase?.availableReturnQuantity || 0)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 cursor-pointer"
                 >
-                  {processing ? 'Processing Return...' : 'Record Return to Vendor'}
+                  <PlusIcon className="w-4 h-4 stroke-[2.5]" />
+                  Add Item to Return Note
                 </button>
               </div>
-            </form>
+            </div>
+
+            {/* STAGED PRODUCTS TABLE (RETURN CART) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-2">
+                  <span>📋</span> 3. Staged Products in this Return Note ({returnItems.length})
+                </h3>
+                {returnItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('Clear all staged products from this return note?')) {
+                        setReturnItems([]);
+                      }
+                    }}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer hover:underline"
+                  >
+                    Clear All Items
+                  </button>
+                )}
+              </div>
+
+              {returnItems.length === 0 ? (
+                <div className="py-8 px-4 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/40 dark:bg-slate-950/20">
+                  <DocumentTextIcon className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-400">No products added to return note yet</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                    Select any purchased product above, enter return quantity, and click <strong>&quot;Add Item to Return Note&quot;</strong>. You can return multiple products together in one note.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+                  <table className="w-full min-w-[750px] text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100/70 dark:bg-slate-800 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 dark:border-slate-700">
+                        <th className="py-2.5 px-3 whitespace-nowrap">#</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap min-w-[200px]">Product Name (Brand) - Weight</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Invoice & Batch</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Reason / Type</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Qty</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap">Unit Rate</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap">Line Refund</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {returnItems.map((item, idx) => (
+                        <tr key={item.tempId} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="py-2.5 px-3 font-mono text-slate-400 whitespace-nowrap">{idx + 1}</td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <div className="font-extrabold text-slate-900 dark:text-white">
+                              {item.product_name} {item.brand ? `(${item.brand})` : ''} - {item.measurement_value}
+                            </div>
+                            {item.sku && (
+                              <div className="text-[10px] font-mono text-slate-400">SKU: {item.sku}</div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <div className="font-mono text-slate-800 dark:text-slate-200">{item.purchase_no}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Batch: {item.batch_number}</div>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className="font-bold text-amber-700 dark:text-amber-400 block">{item.reason}</span>
+                            <span className="text-[10px] text-slate-400">{item.return_type}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-black text-slate-900 dark:text-white whitespace-nowrap">
+                            {item.quantity} Pcs
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono whitespace-nowrap">
+                            ₹{Number(item.return_price).toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black font-mono text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                            ₹{Number(item.total_amount).toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(item.tempId)}
+                              className="p-1 rounded-md text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                              title="Remove item from return note"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* RETURN NOTE GLOBAL AUDIT REMARKS & IMAGE URL */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                  Upload Damaged Product Image (URL)
+                </label>
+                <input
+                  type="text"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="Paste image URL (Optional)..."
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                  Return Note Remarks / Internal Audit Notes
+                </label>
+                <input
+                  type="text"
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder="Explain return reason or agreement with vendor..."
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400"
+                />
+              </div>
+            </div>
           </div>
 
           {/* DYNAMIC RETURN SUMMARY CARD (RIGHT) */}
-          <div className="bg-indigo-950 dark:bg-slate-900 border border-transparent dark:border-slate-800 text-white rounded-2xl p-6 space-y-5 shadow-lg h-fit">
-            <div>
-              <h3 className="text-sm font-extrabold tracking-wider text-indigo-400 dark:text-indigo-300 uppercase">Live Return Summary Card</h3>
-              <p className="text-[10px] text-slate-300 dark:text-slate-400 mt-0.5">Calculations update in real time as you adjust inputs</p>
+          <div className="space-y-4 h-fit">
+            <div className="bg-gradient-to-br from-indigo-950 to-slate-900 border border-indigo-900/40 text-white rounded-2xl p-6 space-y-5 shadow-xl">
+              <div>
+                <h3 className="text-sm font-extrabold tracking-wider text-indigo-300 uppercase flex items-center justify-between">
+                  <span>Grand Return Note Summary</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-800/80 font-mono">
+                    PRN
+                  </span>
+                </h3>
+                <p className="text-[10px] text-indigo-200/80 mt-0.5">Aggregates all products added into this return note</p>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div className="flex justify-between border-b border-indigo-900/60 pb-2">
+                  <span className="text-indigo-300">Supplier:</span>
+                  <span className="font-bold text-right truncate max-w-[180px]">
+                    {selectedVendor ? selectedVendor.company_name : 'None Selected'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between border-b border-indigo-900/60 pb-2">
+                  <span className="text-indigo-300">Products in Return Note:</span>
+                  <span className="font-mono font-black text-amber-300">
+                    {stagedSummary.itemCount} Distinct Item{stagedSummary.itemCount === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between border-b border-indigo-900/60 pb-2">
+                  <span className="text-indigo-300">Total Units to Return:</span>
+                  <span className="font-mono font-black text-white">
+                    {stagedSummary.totalUnits} Pcs
+                  </span>
+                </div>
+
+                <div className="flex justify-between border-b border-indigo-900/60 pb-2">
+                  <span className="text-indigo-300">Return Subtotal:</span>
+                  <span className="font-mono font-bold">
+                    ₹{stagedSummary.subtotal.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex justify-between border-b border-indigo-900/60 pb-2">
+                  <span className="text-indigo-300">Estimated GST Credit:</span>
+                  <span className="font-mono font-bold text-emerald-300">
+                    ₹{stagedSummary.totalGst.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="pt-2 flex justify-between items-center text-sm font-black border-t border-indigo-800/80 text-emerald-300">
+                  <span className="uppercase text-xs tracking-wider">Total Refund Amount:</span>
+                  <span className="font-mono text-lg text-white font-black">
+                    ₹{stagedSummary.grandTotal.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Final Submit Button */}
+              <button
+                type="button"
+                onClick={handleSubmitReturn}
+                disabled={processing || isReadOnly || !selectedVendor || (returnItems.length === 0 && (!selectedProduct || !returnQty))}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none cursor-pointer text-center"
+              >
+                {processing
+                  ? 'Processing Return Note...'
+                  : returnItems.length > 0
+                  ? `Record Vendor Return Note (${returnItems.length} Products)`
+                  : 'Add Items & Record Return'}
+              </button>
             </div>
-            
-            <div className="space-y-3.5 text-xs">
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Invoice Number:</span>
-                <span className="font-mono font-bold">{selectedPurchase ? selectedPurchase.purchaseNo : '—'}</span>
+
+            {/* Current Active Item Card (if user is currently configuring an item) */}
+            {selectedProduct && selectedPurchase && (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-xs space-y-2 shadow-xs">
+                <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">
+                  Active Item Preview
+                </span>
+                <div className="font-bold text-slate-900 dark:text-white truncate">
+                  {selectedProduct.name} - {selectedProduct.measurement_value || selectedProduct.unit}
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Invoice: <span className="font-mono text-slate-800 dark:text-slate-200">{selectedPurchase.purchaseNo}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                  <span>Return Qty: <strong className="font-mono">{returnQty || 0} Pcs</strong></span>
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono">
+                    ₹{liveSummary.totalRefund.toFixed(2)}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Batch Number:</span>
-                <span className="font-mono font-bold">{selectedPurchase ? (selectedPurchase.batchNo || selectedPurchase.batch_no || selectedPurchase.purchaseNo || '—') : '—'}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Purchase Quantity:</span>
-                <span className="font-mono font-bold">{selectedPurchase ? `${selectedPurchase.purchaseQuantity} Pcs` : '—'}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Already Returned Qty:</span>
-                <span className="font-mono font-bold">{selectedPurchase ? `${selectedPurchase.returnedQuantity} Pcs` : '—'}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Current Return Qty:</span>
-                <span className="font-mono font-bold">{returnQty ? `${returnQty} Pcs` : '0 Pcs'}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Remaining Return Qty:</span>
-                <span className="font-mono font-bold text-emerald-300">{selectedPurchase ? `${liveSummary.remainingQty} Pcs` : '—'}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Purchase Price:</span>
-                <span className="font-mono font-bold">₹{liveSummary.purchaseRate.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Return Value:</span>
-                <span className="font-mono font-bold">₹{liveSummary.returnValue.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">GST Amount:</span>
-                <span className="font-mono font-bold">₹{liveSummary.gstAmount.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between border-b border-indigo-900 pb-2">
-                <span className="text-slate-400">Expected Stock After Return:</span>
-                <span className="font-mono font-bold text-amber-300">{selectedProduct ? `${Math.max(0, currentStock - (Number(returnQty) || 0))} Pcs` : '—'}</span>
-              </div>
-              
-              <div className="pt-2 flex justify-between items-center text-sm font-black text-indigo-300">
-                <span>Total Refund Amount:</span>
-                <span className="font-mono text-base text-white">₹{liveSummary.totalRefund.toFixed(2)}</span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1198,52 +1887,110 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <table className="w-full min-w-[1360px] text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-800/60">
-                  <th className="py-3 px-3">Return Number</th>
-                  <th className="py-3 px-3">Return Date</th>
-                  <th className="py-3 px-3">Supplier</th>
-                  <th className="py-3 px-3">Purchase Invoice Number</th>
-                  <th className="py-3 px-3">Product</th>
-                  <th className="py-3 px-3">Batch Number</th>
-                  <th className="py-3 px-3 text-center">Returned Quantity</th>
-                  <th className="py-3 px-3 text-right">Return Amount</th>
-                  <th className="py-3 px-3">Return Reason</th>
-                  <th className="py-3 px-3">Return Type</th>
-                  <th className="py-3 px-3 text-center">Status</th>
-                  <th className="py-3 px-3 text-center">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider bg-slate-50/70 dark:bg-slate-800/60">
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[140px]">Return Number</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[110px]">Return Date</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[160px]">Supplier</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[170px]">Purchase Invoice Number</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[220px]">Product</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[120px]">Batch Number</th>
+                  <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[130px]">Returned Quantity</th>
+                  <th className="py-3.5 px-3.5 text-right whitespace-nowrap min-w-[130px]">Return Amount</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[130px]">Return Reason</th>
+                  <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[110px]">Return Type</th>
+                  <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[150px]">Status</th>
+                  <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[160px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-semibold text-slate-650 dark:text-slate-300">
                 {processedReturnsHistory.map((item, idx) => (
-                  <tr key={`ret-row-${item.id}-${idx}`} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors">
-                    <td className="py-3 px-3 font-mono font-bold text-slate-950 dark:text-white">{item.return_no}</td>
-                    <td className="py-3 px-3 text-slate-450 dark:text-slate-400">{new Date(item.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                    <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">{item.vendor_company_name || item.vendor_name}</td>
-                    <td className="py-3 px-3 font-mono font-bold text-slate-800 dark:text-slate-200">{item.purchase_no || '—'}</td>
-                    <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">{item.product_name}</td>
-                    <td className="py-3 px-3 font-mono text-slate-500 dark:text-slate-400">{item.batch_number || item.batch_no || item.purchase_no || '—'}</td>
-                    <td className="py-3 px-3 text-center tabular-nums font-bold text-slate-800 dark:text-slate-100">{item.quantity}</td>
-                    <td className="py-3 px-3 text-right font-black text-rose-600 dark:text-rose-400 tabular-nums">₹{Number(item.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                    <td className="py-3 px-3 font-bold text-amber-700 dark:text-amber-400">{item.reason}</td>
-                    <td className="py-3 px-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${item.return_type === 'Replacement' ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'}`}>
+                  <tr key={`ret-row-${item.id || item.return_no}-${idx}`} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors">
+                    <td className="py-3 px-3.5 font-mono font-bold text-slate-950 dark:text-white whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span>{item.return_no}</span>
+                        {item.item_count > 1 && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 whitespace-nowrap">
+                            {item.item_count} Items
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">{new Date(item.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                    <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white whitespace-nowrap">{item.vendor_company_name || item.vendor_name}</td>
+                    <td className="py-3 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200" title={item.purchase_no || '—'}>
+                      {(() => {
+                        const invList = Array.isArray(item.purchase_invoices) && item.purchase_invoices.length > 0
+                          ? item.purchase_invoices
+                          : (item.purchase_no ? item.purchase_no.split(',').map((s) => s.trim()).filter(Boolean) : []);
+
+                        if (invList.length === 0 || (invList.length === 1 && invList[0] === '—')) {
+                          return <span className="text-slate-400">—</span>;
+                        }
+
+                        if (invList.length === 1) {
+                          return <span className="whitespace-nowrap">{invList[0]}</span>;
+                        }
+
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            {invList.map((invNo, i) => (
+                              <span key={i} className="whitespace-nowrap">
+                                {invNo}{i < invList.length - 1 ? ',' : ''}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td className="py-3 px-3.5 whitespace-nowrap">
+                      {item.items && item.items.length > 0 ? (
+                        <div>
+                          <div className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 whitespace-nowrap">
+                            <span>{item.items[0].product_name}</span>
+                            {item.items[0].measurement_value && (
+                              <span className="text-[10px] text-slate-400 font-normal">({item.items[0].measurement_value})</span>
+                            )}
+                            {item.items.length > 1 && (
+                              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-indigo-200 dark:border-slate-700 whitespace-nowrap">
+                                +{item.items.length - 1} more
+                              </span>
+                            )}
+                          </div>
+                          {item.items.length > 1 ? (
+                            <div className="text-[10px] text-slate-400 whitespace-nowrap truncate max-w-[260px]" title={item.items.map(it => `${it.product_name} (${it.quantity} Pcs)`).join(', ')}>
+                              {item.items.map(it => `${it.product_name} (${it.quantity})`).join(', ')}
+                            </div>
+                          ) : (
+                            item.items[0].sku ? <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap">SKU: {item.items[0].sku}</span> : null
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-bold text-slate-900 dark:text-white whitespace-nowrap">{item.product_name}</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3.5 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">{item.batch_number || item.batch_no || item.purchase_no || '—'}</td>
+                    <td className="py-3 px-3.5 text-center tabular-nums font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">{item.quantity} Pcs</td>
+                    <td className="py-3 px-3.5 text-right font-black text-rose-600 dark:text-rose-400 tabular-nums whitespace-nowrap">₹{Number(item.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    <td className="py-3 px-3.5 font-bold text-amber-700 dark:text-amber-400 whitespace-nowrap">{item.reason}</td>
+                    <td className="py-3 px-3.5 whitespace-nowrap">
+                      <span className={`whitespace-nowrap px-2 py-0.5 rounded text-[9px] font-bold border ${item.return_type === 'Replacement' ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'}`}>
                         {item.return_type || 'Refund'}
                       </span>
                     </td>
-                    <td className="py-3 px-3 text-center">
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                      <span className={`whitespace-nowrap inline-flex items-center justify-center px-2.5 py-1 rounded-md text-[10px] font-bold border ${getStatusBadgeClass(item.status)}`}>
                         {item.status}
                       </span>
                     </td>
-                    <td className="py-3 px-3">
-                      <div className="flex items-center justify-center gap-1.5">
+                    <td className="py-3 px-3.5 whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                         {/* View VRN */}
                         <button
                           onClick={() => setViewingNote(item)}
-                          title="View Return Note"
+                          title="View Return Note Invoice"
                           className="p-1 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-lg transition-all cursor-pointer border border-indigo-150 dark:border-indigo-800"
                         >
                           <EyeIcon className="w-3.5 h-3.5" />
@@ -1251,7 +1998,7 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                         {/* Print Return Note */}
                         <button
                           onClick={() => handlePrintReturnNote(item)}
-                          title="Print Return Note"
+                          title="Print Return Note Invoice"
                           className="p-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
                         >
                           <PrinterIcon className="w-3.5 h-3.5" />
@@ -1259,7 +2006,7 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                         {/* Download PDF (Triggers Print to PDF) */}
                         <button
                           onClick={() => handlePrintReturnNote(item)}
-                          title="Download PDF"
+                          title="Download Invoice PDF"
                           className="p-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
                         >
                           <ArrowDownTrayIcon className="w-3.5 h-3.5" />
@@ -1271,15 +2018,15 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                             setStatusUpdateVal(item.status);
                           }}
                           title="Change Workflow Status"
-                          className="px-2 py-1 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-lg text-[9px] font-bold cursor-pointer"
+                          className="px-2 py-1 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-lg text-[9px] font-bold cursor-pointer whitespace-nowrap"
                         >
                           Status
                         </button>
                         {/* Delete/Void Return Note */}
                         {!isReadOnly && (
                           <button
-                            onClick={() => handleDeleteReturn(item.id)}
-                            title="Void Return Note"
+                            onClick={() => handleDeleteReturn(item.return_no || item.id)}
+                            title="Void Return Note Invoice"
                             className="p-1 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 rounded-lg transition-all cursor-pointer border border-rose-250 dark:border-rose-800"
                           >
                             <TrashIcon className="w-3.5 h-3.5" />
@@ -1371,27 +2118,27 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Returns Settlement History</h3>
                   <div className="overflow-x-auto max-h-[250px] overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-xs">
+                    <table className="w-full min-w-[650px] text-left border-collapse text-xs">
                       <thead>
                         <tr className="border-b border-slate-100 dark:border-slate-700 text-[10px] font-bold text-slate-400 uppercase bg-slate-50 dark:bg-slate-800/50">
-                          <th className="py-2.5 px-3">Date</th>
-                          <th className="py-2.5 px-3">Note Number</th>
-                          <th className="py-2.5 px-3">Product</th>
-                          <th className="py-2.5 px-3 text-center">Returned Qty</th>
-                          <th className="py-2.5 px-3 text-right">Refund Amount</th>
-                          <th className="py-2.5 px-3 text-center">Status</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">Note Number</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">Product</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap">Returned Qty</th>
+                          <th className="py-2.5 px-3 text-right whitespace-nowrap">Refund Amount</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300">
                         {ledgerHistory.map((h, idx) => (
                           <tr key={`lh-row-${h.id}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                            <td className="py-2.5 px-3 text-slate-405 dark:text-slate-400">{new Date(h.created_at).toLocaleDateString('en-IN')}</td>
-                            <td className="py-2.5 px-3 font-mono text-slate-850 dark:text-white font-bold">{h.return_no}</td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-white">{h.product_name || h.productName || '—'}</td>
-                            <td className="py-2.5 px-3 text-center text-slate-800 dark:text-slate-200">{h.quantity}</td>
-                            <td className="py-2.5 px-3 text-right text-rose-500 dark:text-rose-400">₹{Number(h.total_amount).toFixed(2)}</td>
-                            <td className="py-2.5 px-3 text-center">
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-250 dark:border-amber-800">{h.status}</span>
+                            <td className="py-2.5 px-3 text-slate-405 dark:text-slate-400 whitespace-nowrap">{new Date(h.created_at).toLocaleDateString('en-IN')}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-850 dark:text-white font-bold whitespace-nowrap">{h.return_no}</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">{h.product_name || h.productName || '—'}</td>
+                            <td className="py-2.5 px-3 text-center text-slate-800 dark:text-slate-200 whitespace-nowrap">{h.quantity}</td>
+                            <td className="py-2.5 px-3 text-right text-rose-500 dark:text-rose-400 whitespace-nowrap">₹{Number(h.total_amount).toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                              <span className={`whitespace-nowrap px-2 py-0.5 rounded text-[9px] font-bold border ${getStatusBadgeClass(h.status)}`}>{h.status}</span>
                             </td>
                           </tr>
                         ))}
@@ -1430,27 +2177,86 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
-              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-1">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Item Details</span>
-                <div>Product: <span className="text-slate-900 dark:text-white font-bold">{viewingNote.product_name}</span></div>
-                <div>Quantity: <span className="text-slate-900 dark:text-white font-bold">{viewingNote.quantity} Pcs</span></div>
-                <div>Return Rate: <span className="text-slate-900 dark:text-white font-bold">₹{Number(viewingNote.return_price).toFixed(2)}</span></div>
-                <div>Return Type: <span className="text-slate-900 dark:text-white font-bold">{viewingNote.return_type || 'Refund'}</span></div>
-                <div>Invoice Ref: <span className="text-slate-900 dark:text-white font-mono font-bold">{viewingNote.purchase_no || '—'}</span></div>
-                <div>Batch No: <span className="text-slate-900 dark:text-white font-mono">{viewingNote.batch_number || viewingNote.batch_no || viewingNote.purchase_no || '—'}</span></div>
-                <div>Expiry Date: <span className="text-slate-900 dark:text-white">{viewingNote.expiry_date ? new Date(viewingNote.expiry_date).toLocaleDateString('en-IN') : 'N/A'}</span></div>
-              </div>
-              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Settlement Summary</span>
-                <div>Subtotal Value: <span className="text-slate-900 dark:text-slate-200">₹{(Number(viewingNote.quantity) * Number(viewingNote.return_price)).toFixed(2)}</span></div>
-                <div>GST Adjustment: <span className="text-slate-900 dark:text-slate-200">₹{(Number(viewingNote.total_amount) - (Number(viewingNote.quantity) * Number(viewingNote.return_price))).toFixed(2)}</span></div>
-                <div className="border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1.5 flex justify-between font-black text-rose-600 dark:text-rose-400">
-                  <span>Refund Deducted:</span>
-                  <span>₹{Number(viewingNote.total_amount).toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
+            {(() => {
+              const displayItems = viewingNote.items && viewingNote.items.length > 0 
+                ? viewingNote.items 
+                : ((returns || []).filter((r) => r.return_no === viewingNote.return_no) || [viewingNote]);
+              const grossVal = displayItems.reduce((acc, it) => acc + (Number(it.quantity || 0) * Number(it.return_price || 0)), 0);
+              const totalRefund = Number(viewingNote.total_amount || displayItems.reduce((acc, it) => acc + Number(it.total_amount || 0), 0));
+              const gstAdj = Math.max(0, totalRefund - grossVal);
+              const totalUnits = displayItems.reduce((acc, it) => acc + Number(it.quantity || 0), 0);
+
+              return (
+                <>
+                  <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-1.5">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Return Invoice Details</span>
+                      <div>Supplier: <span className="text-slate-900 dark:text-white font-bold">{viewingNote.vendor_company_name || viewingNote.vendor_name}</span></div>
+                      <div>Total Products: <span className="text-slate-900 dark:text-white font-bold">{displayItems.length} Distinct Products</span></div>
+                      <div>Total Returned Units: <span className="text-slate-900 dark:text-white font-bold">{totalUnits} Pcs</span></div>
+                      <div>Settlement Type: <span className="text-slate-900 dark:text-white font-bold">{viewingNote.return_type || 'Refund'}</span></div>
+                      <div>Purchase Ref: <span className="text-slate-900 dark:text-white font-mono font-bold">{viewingNote.purchase_no || '—'}</span></div>
+                      <div>Primary Reason: <span className="text-amber-600 dark:text-amber-400 font-bold">{viewingNote.reason}</span></div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-1.5">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Financial Settlement Summary</span>
+                      <div>Gross Return Value: <span className="text-slate-900 dark:text-slate-200 font-mono">₹{grossVal.toFixed(2)}</span></div>
+                      <div>Estimated GST Credit: <span className="text-slate-900 dark:text-slate-200 font-mono">₹{gstAdj.toFixed(2)}</span></div>
+                      <div className="border-t border-slate-100 dark:border-slate-700 pt-2 mt-2 flex justify-between font-black text-rose-600 dark:text-rose-400 text-sm">
+                        <span>Total Refund Deducted:</span>
+                        <span className="font-mono">₹{totalRefund.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Multi-Item Breakdown Table */}
+                  <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-2">
+                    <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-1.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Itemized Products in this Return Note ({displayItems.length})
+                      </span>
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Total Units: {totalUnits} Pcs • Total: ₹{totalRefund.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto max-h-[220px] overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="text-[9px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-slate-700">
+                            <th className="py-1.5 px-2">#</th>
+                            <th className="py-1.5 px-2">Product Description</th>
+                            <th className="py-1.5 px-2">Invoice / Batch</th>
+                            <th className="py-1.5 px-2 text-center">Qty</th>
+                            <th className="py-1.5 px-2 text-right">Rate</th>
+                            <th className="py-1.5 px-2 text-right">Line Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {displayItems.map((it, idx) => (
+                            <tr key={it.id || idx}>
+                              <td className="py-2 px-2 font-mono text-slate-400">{idx + 1}</td>
+                              <td className="py-2 px-2">
+                                <div className="font-bold text-slate-800 dark:text-white">
+                                  {it.product_name} {it.measurement_value ? `- ${it.measurement_value}` : ''}
+                                </div>
+                                <span className="block text-[10px] text-amber-600 font-normal">{it.reason} ({it.return_type || 'Refund'})</span>
+                              </td>
+                              <td className="py-2 px-2 font-mono text-slate-500">
+                                <div>{it.purchase_no || '—'}</div>
+                                <div className="text-[10px] text-slate-400">{it.batch_number || it.batch_no || '—'}</div>
+                              </td>
+                              <td className="py-2 px-2 text-center font-bold text-slate-800 dark:text-slate-200">{it.quantity} Pcs</td>
+                              <td className="py-2 px-2 text-right font-mono">₹{Number(it.return_price).toFixed(2)}</td>
+                              <td className="py-2 px-2 text-right font-black font-mono text-rose-600 dark:text-rose-400">₹{Number(it.total_amount).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Remarks & Image */}
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-2">

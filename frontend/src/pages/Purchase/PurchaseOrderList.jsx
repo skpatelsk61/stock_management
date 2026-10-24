@@ -11,7 +11,8 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   InboxArrowDownIcon,
-  EyeIcon
+  EyeIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import { purchaseOrdersAPI, purchasesAPI, settingsAPI } from '../../services/api';
 import PurchaseOrderForm from '../../components/forms/PurchaseOrderForm';
@@ -108,9 +109,26 @@ const PurchaseOrderList = () => {
       const res = await purchaseOrdersAPI.createGRN(selectedPO.id, data);
       if (res.success) {
         toast.success(res.message || 'GRN saved successfully!');
+        const updatedPoId = selectedPO?.id;
+        const newStatus = res.poStatus;
+        if (updatedPoId) {
+          setPurchaseOrders((prev) =>
+            prev.map((p) =>
+              p.id === updatedPoId
+                ? {
+                    ...p,
+                    status: newStatus || p.status,
+                    total: res.poTotal !== undefined ? res.poTotal : p.total,
+                    subtotal: res.poSubtotal !== undefined ? res.poSubtotal : p.subtotal,
+                    gst_amount: res.poGstAmount !== undefined ? res.poGstAmount : p.gst_amount
+                  }
+                : p
+            )
+          );
+        }
         setShowGRNForm(false);
         setSelectedPO(null);
-        fetchPurchaseOrders();
+        await fetchPurchaseOrders();
         window.dispatchEvent(new CustomEvent('inventory-updated'));
         window.dispatchEvent(new CustomEvent('stock-changed'));
         window.dispatchEvent(new CustomEvent('purchases-updated'));
@@ -154,8 +172,15 @@ const PurchaseOrderList = () => {
       const res = await purchasesAPI.create(payload);
       if (res.success) {
         if (selectedPO?.id) {
-          const targetStatus = data.finalize_po !== false ? 'Completed' : 'Partially Received';
-          await purchaseOrdersAPI.updateStatus(selectedPO.id, { status: targetStatus });
+          try {
+            const targetStatus = data.finalize_po !== false ? 'Completed' : 'Partially Pending';
+            await purchaseOrdersAPI.updateStatus(selectedPO.id, {
+              status: targetStatus,
+              force: data.finalize_po === true
+            });
+          } catch (statusErr) {
+            console.warn('PO status update notice:', statusErr);
+          }
         }
         toast.success('Purchase invoice created successfully!');
         setShowInvoiceForm(false);
@@ -254,12 +279,19 @@ const PurchaseOrderList = () => {
   };
 
   const filteredOrders = useMemo(() => {
-    return purchaseOrders.filter((po) => {
+    return purchaseOrders.map(p => ({
+      ...p,
+      status: p.status === 'Partially Received' ? 'Partially Pending' : p.status
+    })).filter((po) => {
       const poNo = String(po?.purchase_order_no || '').toLowerCase();
       const vName = String(po?.vendor_name || '').toLowerCase();
       const q = (searchQuery || '').toLowerCase();
       const matchSearch = poNo.includes(q) || vName.includes(q);
-      const matchStatus = statusFilter === 'all' || po.status === statusFilter;
+      const matchStatus =
+        statusFilter === 'all' ||
+        po.status === statusFilter ||
+        (statusFilter === 'Partially Pending' && (po.status === 'Partially Pending' || po.status === 'Partially Received')) ||
+        (statusFilter === 'Pending' && (po.status === 'Pending' || po.status === 'Draft'));
       return matchSearch && matchStatus;
     });
   }, [purchaseOrders, searchQuery, statusFilter]);
@@ -268,10 +300,13 @@ const PurchaseOrderList = () => {
     switch (status) {
       case 'Draft':
         return 'bg-slate-100 text-slate-700 border border-slate-200';
+      case 'Pending':
+        return 'bg-yellow-50 text-yellow-700 border border-yellow-200';
       case 'Sent':
         return 'bg-blue-50 text-blue-700 border border-blue-200';
       case 'Confirmed':
         return 'bg-amber-50 text-amber-700 border border-amber-200';
+      case 'Partially Pending':
       case 'Partially Received':
         return 'bg-orange-50 text-orange-700 border border-orange-200';
       case 'Completed':
@@ -290,7 +325,9 @@ const PurchaseOrderList = () => {
     const discount = Number(po.discount || 0);
     const total = Number(po.total || 0);
     
-    const itemsHtml = po.items.map((item, idx) => `
+    const itemsHtml = po.items.map((item, idx) => {
+      const isPendingRate = Number(item.purchase_price || 0) === 0;
+      return `
       <tr>
         <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${idx + 1}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">${item.product_name || 'Product'}</td>
@@ -298,13 +335,14 @@ const PurchaseOrderList = () => {
         <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: center;">${item.category || 'General'}</td>
         <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${item.quantity}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: center;">${item.unit || 'Pcs'}</td>
-        <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${Number(item.purchase_price || 0).toFixed(2)}</td>
-        <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${item.gst || 0}%</td>
+        <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">${isPendingRate ? 'Rate on Delivery' : '₹' + Number(item.purchase_price).toFixed(2)}</td>
+        <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${isPendingRate ? 'On Delivery' : (item.gst || 0) + '%'}</td>
         <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹0.00</td>
-        <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">₹${Number(item.total || 0).toFixed(2)}</td>
+        <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">${isPendingRate ? '—' : '₹' + Number(item.total || 0).toFixed(2)}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: center; color: #64748b; font-size: 9px;">${item.remarks || '—'}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     win.document.write(`
       <html>
@@ -525,11 +563,12 @@ const PurchaseOrderList = () => {
           className="bg-slate-50/50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 font-bold"
         >
           <option value="all">All Statuses</option>
+          <option value="Pending">Pending</option>
+          <option value="Partially Pending">Partially Pending</option>
+          <option value="Completed">Completed</option>
           <option value="Draft">Draft</option>
           <option value="Sent">Sent</option>
           <option value="Confirmed">Confirmed</option>
-          <option value="Partially Received">Partially Received</option>
-          <option value="Completed">Completed</option>
           <option value="Cancelled">Cancelled</option>
         </select>
       </div>
@@ -545,43 +584,52 @@ const PurchaseOrderList = () => {
             No purchase orders found matching filters.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div 
+            className="overflow-x-auto max-h-[295px] overflow-y-auto custom-scrollbar border border-slate-200/80 rounded-xl shadow-2xs"
+            style={{ maxHeight: '295px' }}
+          >
             <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
-                  <th className="py-3 px-4">PO Number</th>
-                  <th className="py-3 px-4">Vendor</th>
-                  <th className="py-3 px-4">Order Date</th>
-                  <th className="py-3 px-4">Expected Delivery</th>
-                  <th className="py-3 px-4 text-right">Total Amount</th>
-                  <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-center">Actions</th>
+              <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 z-10 shadow-xs">
+                <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50 dark:bg-slate-800">
+                  <th className="py-3 px-4 whitespace-nowrap">PO Number</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Vendor</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Order Date</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Expected Delivery</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Amount</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Status</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-600">
                 {filteredOrders.map((po) => (
                   <tr key={po.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-950">
+                    <td className="py-3.5 px-4 font-mono font-bold text-slate-950 whitespace-nowrap">
                       <button onClick={() => handleViewDetails(po)} className="hover:text-indigo-650 hover:underline">
                         {po.purchase_order_no}
                       </button>
                     </td>
-                    <td className="py-3.5 px-4 font-bold text-slate-900">{po.vendor_name}</td>
-                    <td className="py-3.5 px-4">{new Date(po.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                    <td className="py-3.5 px-4 text-slate-500">
+                    <td className="py-3.5 px-4 font-bold text-slate-900 whitespace-nowrap">{po.vendor_name}</td>
+                    <td className="py-3.5 px-4 whitespace-nowrap">{new Date(po.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                    <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
                       {po.expected_delivery_date 
                         ? new Date(po.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
                         : '—'}
                     </td>
-                    <td className="py-3.5 px-4 text-right font-black text-slate-950 tabular-nums">
-                      ₹{Number(po.total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    <td className="py-3.5 px-4 text-right font-black text-slate-950 tabular-nums whitespace-nowrap">
+                      {Number(po.total) === 0 ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 whitespace-nowrap">
+                          Pending Bill Verification
+                        </span>
+                      ) : (
+                        `₹${Number(po.total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                      )}
                     </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${getStatusBadge(po.status)}`}>
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap ${getStatusBadge(po.status)}`}>
                         {po.status}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="flex items-center justify-center gap-2">
                         {/* View Details */}
                         <button
@@ -593,10 +641,10 @@ const PurchaseOrderList = () => {
                         </button>
 
                         {/* GRN goods inward */}
-                        {!isReadOnly && ['Draft', 'Sent', 'Confirmed', 'Partially Received'].includes(po.status) && (
+                        {!isReadOnly && ['Draft', 'Pending', 'Sent', 'Confirmed', 'Partially Pending', 'Partially Received'].includes(po.status) && (
                           <button
                             onClick={() => handleOpenGRN(po)}
-                            title="Receive Shipment (GRN)"
+                            title={['Partially Pending', 'Partially Received'].includes(po.status) ? "Receive Remaining Stock (GRN)" : "Receive Shipment (GRN)"}
                             className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg active:scale-90 transition-all cursor-pointer"
                           >
                             <InboxArrowDownIcon className="w-4 h-4 stroke-[2]" />
@@ -604,7 +652,7 @@ const PurchaseOrderList = () => {
                         )}
 
                         {/* Invoice conversion - Available on active PO statuses */}
-                        {!isReadOnly && ['Draft', 'Sent', 'Confirmed', 'Partially Received'].includes(po.status) && (
+                        {!isReadOnly && ['Draft', 'Pending', 'Sent', 'Confirmed', 'Partially Pending', 'Partially Received'].includes(po.status) && (
                           <button
                             onClick={() => handleOpenInvoice(po)}
                             title="Create Invoice (PI) - Update Supplier Balance & Stock"
@@ -615,7 +663,7 @@ const PurchaseOrderList = () => {
                         )}
 
                         {/* Cancel order */}
-                        {!isReadOnly && ['Draft', 'Sent', 'Confirmed'].includes(po.status) && (
+                        {!isReadOnly && ['Draft', 'Pending', 'Sent', 'Confirmed'].includes(po.status) && (
                           <button
                             onClick={() => handleCancelPO(po.id)}
                             title="Cancel Order"
@@ -626,7 +674,7 @@ const PurchaseOrderList = () => {
                         )}
 
                         {/* Delete PO */}
-                        {!isReadOnly && ['Draft', 'Cancelled'].includes(po.status) && (
+                        {!isReadOnly && ['Draft', 'Pending', 'Cancelled'].includes(po.status) && (
                           <button
                             onClick={() => handleDeletePO(po.id)}
                             title="Delete Permanently"
@@ -776,6 +824,16 @@ const PurchaseOrderList = () => {
                 </div>
               </div>
 
+              {['Partially Pending', 'Partially Received'].includes(viewingPO.status) && (
+                <div className="flex items-center gap-2.5 p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs font-bold">
+                  <ExclamationTriangleIcon className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <div>
+                    <span className="block font-black text-amber-950">Shipment Partially Pending — Missing Items Pending Delivery</span>
+                    <span className="text-[11px] font-semibold text-amber-700">This Purchase Order stays open in &quot;Partially Pending&quot; status. Full stock has not arrived yet. You can click &quot;Receive Remaining Stock (GRN)&quot; when the supplier delivers the remaining goods.</span>
+                  </div>
+                </div>
+              )}
+
               {/* info billing columns */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="border border-slate-200 rounded-xl p-4 space-y-2">
@@ -819,24 +877,206 @@ const PurchaseOrderList = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                    {viewingPO.items.map((item, index) => (
-                      <tr key={index} className="hover:bg-slate-50/50">
-                        <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-[10px]">{index + 1}</td>
-                        <td className="py-2.5 px-4 text-slate-900 font-bold">{item.product_name}</td>
-                        <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{item.barcode || '—'}</td>
-                        <td className="py-2.5 px-4 text-center text-slate-500">{item.category || 'General'}</td>
-                        <td className="py-2.5 px-4 text-center tabular-nums">{item.quantity}</td>
-                        <td className="py-2.5 px-4 text-center text-slate-450">{item.unit || 'Pcs'}</td>
-                        <td className="py-2.5 px-4 text-right tabular-nums">₹{Number(item.purchase_price).toFixed(2)}</td>
-                        <td className="py-2.5 px-4 text-center tabular-nums text-slate-500">{item.gst || 0}%</td>
-                        <td className="py-2.5 px-4 text-right tabular-nums text-rose-500">₹0.00</td>
-                        <td className="py-2.5 px-4 text-right font-black text-slate-900 tabular-nums">₹{Number(item.total).toFixed(2)}</td>
-                        <td className="py-2.5 px-4 text-center text-slate-400 italic text-[11px]">{item.remarks || '—'}</td>
-                      </tr>
-                    ))}
+                    {viewingPO.items.map((item, index) => {
+                      const isPendingRate = Number(item.purchase_price || 0) === 0;
+                      return (
+                        <tr key={index} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-[10px]">{index + 1}</td>
+                          <td className="py-2.5 px-4 text-slate-900 font-bold">{item.product_name}</td>
+                          <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{item.barcode || '—'}</td>
+                          <td className="py-2.5 px-4 text-center text-slate-500">{item.category || 'General'}</td>
+                          <td className="py-2.5 px-4 text-center tabular-nums">
+                            <span className="font-bold text-slate-900">{item.quantity}</span>
+                            {['Partially Pending', 'Partially Received'].includes(viewingPO.status) && (
+                              <div className="text-[9px] font-bold mt-0.5">
+                                {Number(item.received_quantity || 0) < Number(item.quantity) ? (
+                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 inline-block">
+                                    In: {Number(item.received_quantity || 0)} | Short: {Number(item.quantity) - Number(item.received_quantity || 0)}
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">
+                                    100% Inwarded
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-center text-slate-450">{item.unit || 'Pcs'}</td>
+                          <td className="py-2.5 px-4 text-right tabular-nums">
+                            {isPendingRate ? (
+                              <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold">Rate on Delivery</span>
+                            ) : (
+                              `₹${Number(item.purchase_price).toFixed(2)}`
+                            )}
+                          </td>
+                          <td className="py-2.5 px-4 text-center tabular-nums text-slate-500">
+                            {isPendingRate ? 'On Delivery' : `${item.gst || 0}%`}
+                          </td>
+                          <td className="py-2.5 px-4 text-right tabular-nums text-rose-500">₹0.00</td>
+                          <td className="py-2.5 px-4 text-right font-black text-slate-900 tabular-nums">
+                            {isPendingRate ? '—' : `₹${Number(item.total).toFixed(2)}`}
+                          </td>
+                          <td className="py-2.5 px-4 text-center text-slate-400 italic text-[11px]">{item.remarks || '—'}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+
+              {/* STOCK DELIVERY INSTALLMENTS BREAKDOWN */}
+              {Array.isArray(viewingPO.shipments) && viewingPO.shipments.length > 0 && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+                  <div className="bg-slate-800 text-white px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">📦</span>
+                      <h4 className="text-xs font-black uppercase tracking-wider">
+                        Stock Delivery &amp; Intake Installments (माल प्राप्ति किश्त विवरण)
+                      </h4>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded">
+                      Total {viewingPO.shipments.length} Delivery Installment{viewingPO.shipments.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">
+                        <th className="py-2 px-3 text-center w-12">Installment</th>
+                        <th className="py-2 px-3">GRN Number</th>
+                        <th className="py-2 px-3">Intake Date</th>
+                        <th className="py-2 px-3 text-center">Delivered Qty</th>
+                        <th className="py-2 px-3 text-center">Damaged / Rejected</th>
+                        <th className="py-2 px-3 text-center font-bold text-emerald-800">Accepted Inward</th>
+                        <th className="py-2 px-3 text-right font-black">Shipment Value (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                      {viewingPO.shipments.map((ship, sIdx) => {
+                        const sDate = ship.date ? new Date(ship.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                        const recQty = Number(ship.total_received || 0);
+                        const damQty = Number(ship.total_damaged || 0) + Number(ship.total_rejected || 0);
+                        const accQty = Number(ship.total_accepted || Math.max(0, recQty - damQty));
+                        const shipAmt = Number(ship.amount || 0);
+
+                        return (
+                          <tr key={sIdx} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 text-center font-bold text-slate-500 text-[10px]">
+                              #{ship.installment_no || sIdx + 1}
+                            </td>
+                            <td className="py-2 px-3 font-mono font-bold text-slate-900">
+                              {ship.grn_no || `GRN-${ship.id}`}
+                            </td>
+                            <td className="py-2 px-3 text-slate-600">{sDate}</td>
+                            <td className="py-2 px-3 text-center font-bold text-slate-900">{recQty}</td>
+                            <td className="py-2 px-3 text-center">
+                              {damQty > 0 ? (
+                                <span className="text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded text-[10px] font-bold">
+                                  {damQty} Damaged
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-center font-bold text-emerald-700">{accQty}</td>
+                            <td className="py-2 px-3 text-right font-mono font-black text-slate-900">
+                              ₹{shipAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-50 font-bold border-t border-slate-200 text-slate-900 text-[11px]">
+                        <td colSpan="3" className="py-2 px-3 uppercase tracking-wider text-slate-500">
+                          Total Received Across Deliveries:
+                        </td>
+                        <td className="py-2 px-3 text-center font-black">
+                          {viewingPO.shipments.reduce((sum, s) => sum + Number(s.total_received || 0), 0)}
+                        </td>
+                        <td className="py-2 px-3 text-center text-rose-700 font-black">
+                          {viewingPO.shipments.reduce((sum, s) => sum + (Number(s.total_damaged || 0) + Number(s.total_rejected || 0)), 0)}
+                        </td>
+                        <td className="py-2 px-3 text-center text-emerald-700 font-black">
+                          {viewingPO.shipments.reduce((sum, s) => sum + Number(s.total_accepted || 0), 0)}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono font-black text-emerald-800">
+                          ₹{viewingPO.shipments.reduce((sum, s) => sum + Number(s.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {/* PAYMENT SETTLEMENT INSTALLMENTS */}
+              {Array.isArray(viewingPO.payments) && viewingPO.payments.length > 0 && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+                  <div className="bg-emerald-900 text-white px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">💳</span>
+                      <h4 className="text-xs font-black uppercase tracking-wider">
+                        Supplier Payment Installments (भुगतान किश्त विवरण)
+                      </h4>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-200 bg-emerald-950 px-2 py-0.5 rounded">
+                      Total {viewingPO.payments.length} Payment Installment{viewingPO.payments.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-emerald-50/50 text-[10px] font-bold text-slate-600 uppercase border-b border-emerald-200">
+                        <th className="py-2 px-3 text-center w-12">Payment</th>
+                        <th className="py-2 px-3">Voucher No.</th>
+                        <th className="py-2 px-3">Payment Date</th>
+                        <th className="py-2 px-3 text-center">Payment Mode</th>
+                        <th className="py-2 px-3">Invoice Ref</th>
+                        <th className="py-2 px-3 text-right font-black">Amount Paid (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                      {viewingPO.payments.map((pay, pIdx) => {
+                        const pDate = pay.payment_date ? new Date(pay.payment_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                        const pAmt = Number(pay.amount || 0);
+
+                        return (
+                          <tr key={pIdx} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 text-center font-bold text-slate-500 text-[10px]">
+                              #{pay.installment_no || pIdx + 1}
+                            </td>
+                            <td className="py-2 px-3 font-mono font-bold text-slate-900">
+                              {pay.payment_no || `VPAY-${pay.id}`}
+                            </td>
+                            <td className="py-2 px-3 text-slate-600">{pDate}</td>
+                            <td className="py-2 px-3 text-center">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 font-bold text-[10px] text-slate-700 border border-slate-200">
+                                {pay.payment_mode || 'Cash'}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-600 text-[11px] font-mono">
+                              {pay.purchase_no || pay.reference_no || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono font-black text-emerald-700">
+                              ₹{pAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-emerald-50/80 font-bold border-t border-emerald-200 text-slate-900 text-[11px]">
+                        <td colSpan="5" className="py-2 px-3 uppercase tracking-wider text-slate-700 text-right">
+                          Total Payments Settled:
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono font-black text-emerald-800">
+                          ₹{viewingPO.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
 
               {/* terms notes totals layout */}
               <div className="grid grid-cols-1 md:grid-cols-5 gap-5 items-start">
@@ -849,12 +1089,31 @@ const PurchaseOrderList = () => {
                 </div>
 
                 <div className="md:col-span-2 bg-emerald-950 text-white rounded-xl p-4 shadow-sm space-y-2.5 text-xs font-semibold">
-                  <div className="flex justify-between"><span>Subtotal:</span><span className="font-mono text-slate-200">₹{Number(viewingPO.subtotal).toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>GST Amount:</span><span className="font-mono text-slate-200">₹{Number(viewingPO.gst_amount).toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>Discount Amount:</span><span className="font-mono text-rose-300">-₹{Number(viewingPO.discount || 0).toFixed(2)}</span></div>
+                  <div className="flex justify-between">
+                    <span>Subtotal:</span>
+                    <span className="font-mono text-slate-200">
+                      {Number(viewingPO.total) === 0 ? 'Pending Delivery Bill' : `₹${Number(viewingPO.subtotal).toFixed(2)}`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>GST Amount:</span>
+                    <span className="font-mono text-slate-200">
+                      {Number(viewingPO.total) === 0 ? 'On Delivery' : `₹${Number(viewingPO.gst_amount).toFixed(2)}`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Discount Amount:</span>
+                    <span className="font-mono text-rose-300">-₹{Number(viewingPO.discount || 0).toFixed(2)}</span>
+                  </div>
                   <div className="border-t border-emerald-800/80 pt-2 flex justify-between items-center font-extrabold text-sm text-emerald-300">
                     <span>Grand Total:</span>
-                    <span className="font-mono text-base font-black">₹{Number(viewingPO.total).toFixed(2)}</span>
+                    <span className="font-mono text-base font-black">
+                      {Number(viewingPO.total) === 0 ? (
+                        <span className="text-amber-300 text-xs">Pending Bill Verification</span>
+                      ) : (
+                        `₹${Number(viewingPO.total).toFixed(2)}`
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -892,7 +1151,7 @@ const PurchaseOrderList = () => {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                {!isReadOnly && ['Draft', 'Sent', 'Confirmed', 'Partially Received'].includes(viewingPO.status) && (
+                {!isReadOnly && ['Draft', 'Pending', 'Sent', 'Confirmed', 'Partially Pending', 'Partially Received'].includes(viewingPO.status) && (
                   <button
                     onClick={() => {
                       const poToConvert = viewingPO;

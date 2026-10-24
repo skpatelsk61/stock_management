@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   CalendarIcon,
   DocumentTextIcon,
@@ -21,16 +21,18 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
     auto_create_invoice: true,
     items: purchaseOrder.items.map((item) => {
       const ord = Number(item.quantity || 0);
-      const prev = Number(item.received_quantity || 0);
-      const remaining = Math.max(0, ord - prev);
+      const prevDel = Number(item.total_delivered !== undefined && item.total_delivered !== null ? item.total_delivered : (item.delivered_quantity ?? item.received_quantity ?? 0));
+      const prevAcc = Number(item.received_quantity || 0);
+      const remaining = Math.max(0, ord - prevDel);
       return {
         product_id: item.product_id,
         name: item.product_name,
         barcode: item.barcode || '',
-        purchase_price: Number(item.purchase_price || 0),
-        gst: Number(item.gst || 0),
+        purchase_price: Number(item.purchase_price || 0) > 0 ? Number(item.purchase_price) : '',
+        gst: item.gst !== undefined && item.gst !== null && Number(item.gst) >= 0 ? Number(item.gst) : 0,
         ordered_quantity: ord,
-        previously_received: prev,
+        previously_delivered: prevDel,
+        previously_received: prevAcc,
         quantity_received: remaining > 0 ? remaining : '',
         quantity_damaged: '',
         quantity_rejected: '',
@@ -43,14 +45,48 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
     }),
   });
 
-  // Default lockPO to false if there is any shortage or damaged items, or true if full delivery with no damages
-  const initialAllClean = formData.items.every((it) => {
-    const remaining = it.ordered_quantity - it.previously_received;
-    const rec = it.quantity_received === '' ? 0 : Number(it.quantity_received);
-    const dam = Number(it.quantity_damaged) || 0;
-    return remaining > 0 && rec === remaining && dam === 0;
-  });
-  const [lockPO, setLockPO] = useState(initialAllClean);
+  // Dynamically calculate whether 100% full stock has arrived or if items are missing/short
+  const deliveryStatusInfo = useMemo(() => {
+    let hasShortageOrMissing = false;
+    let totalOrderedUnits = 0;
+    let totalDeliveredUnits = 0;
+    let totalNetAcceptedUnits = 0;
+    let totalPendingShortageUnits = 0;
+
+    formData.items.forEach((it) => {
+      const ord = Number(it.ordered_quantity) || 0;
+      const prevDel = Number(it.previously_delivered || 0);
+      const prevAcc = Number(it.previously_received || 0);
+      const rec = it.quantity_received === '' ? 0 : Number(it.quantity_received) || 0;
+      const dam = Number(it.quantity_damaged) || 0;
+      const rej = Number(it.quantity_rejected) || 0;
+      const netAcc = Math.max(0, rec - dam - rej);
+
+      const cumDelivered = prevDel + rec;
+      const cumAccepted = prevAcc + netAcc;
+
+      totalOrderedUnits += ord;
+      totalDeliveredUnits += cumDelivered;
+      totalNetAcceptedUnits += cumAccepted;
+
+      if (cumDelivered < ord) {
+        hasShortageOrMissing = true;
+        totalPendingShortageUnits += (ord - cumDelivered);
+      }
+    });
+
+    const isFullStockArrived = !hasShortageOrMissing && totalOrderedUnits > 0;
+
+    return {
+      isFullStockArrived,
+      hasShortageOrMissing,
+      totalOrderedUnits,
+      totalDeliveredUnits,
+      totalNetAcceptedUnits,
+      totalPendingShortageUnits
+    };
+  }, [formData.items]);
+
   const [reportMissingItems, setReportMissingItems] = useState(false);
   const [includeDamagedPayment, setIncludeDamagedPayment] = useState(false);
   const [includeMissingPayment, setIncludeMissingPayment] = useState(false);
@@ -155,6 +191,9 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
       }
 
       if (rec > 0) {
+        if (item.purchase_price === '' || isNaN(Number(item.purchase_price)) || Number(item.purchase_price) <= 0) {
+          tempErrors[`item_${idx}_purchase_price`] = 'Unit Rate (₹) is required';
+        }
         if (item.mrp === '' || isNaN(Number(item.mrp)) || Number(item.mrp) < 0) {
           tempErrors[`item_${idx}_mrp`] = 'MRP is required';
         }
@@ -189,7 +228,7 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
       date: formData.date,
       notes: finalNotes,
       auto_create_invoice: true,
-      finalize_po: lockPO,
+      finalize_po: deliveryStatusInfo.isFullStockArrived,
       include_damaged_payment: includeDamagedPayment,
       include_missing_payment: includeMissingPayment,
       items: formData.items.map((item) => {
@@ -203,8 +242,8 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
 
         return {
           product_id: item.product_id,
-          purchase_price: item.purchase_price,
-          gst: item.gst,
+          purchase_price: Number(item.purchase_price) || 0,
+          gst: Number(item.gst) || 0,
           quantity_received: rec,
           quantity_damaged: dam,
           quantity_rejected: rej,
@@ -290,121 +329,188 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                   </div>
                 </div>
 
-                {/* Input Fields Grid (6 Columns) */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-start">
+                {/* Input Fields Grid (2 Rows: Quantities & Batch, then Rates & Pricing) */}
+                <div className="space-y-3">
                   
-                  {/* 1. Qty Received */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider block">
-                      Qty Received *
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={remaining}
-                      value={item.quantity_received}
-                      onChange={(e) => handleItemChange(idx, 'quantity_received', e.target.value)}
-                      placeholder="0"
-                      className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none font-mono ${
-                        errors[`item_${idx}_received`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-600'
-                      }`}
-                    />
-                    {errors[`item_${idx}_received`] && (
-                      <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_received`]}</p>
-                    )}
+                  {/* Row 1: Quantities & Batch */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-start">
+                    {/* 1. Qty Received */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider block">
+                        Qty Received *
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={remaining}
+                        value={item.quantity_received}
+                        onChange={(e) => handleItemChange(idx, 'quantity_received', e.target.value)}
+                        placeholder="0"
+                        className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none font-mono ${
+                          errors[`item_${idx}_received`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-600'
+                        }`}
+                      />
+                      {errors[`item_${idx}_received`] && (
+                        <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_received`]}</p>
+                      )}
+                    </div>
+
+                    {/* 2. Damaged and Defective Qty */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-rose-700 uppercase tracking-wider block truncate" title="Damaged and Defective Qty">
+                        Damaged &amp; Defective Qty
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={item.quantity_received !== '' ? Number(item.quantity_received) : undefined}
+                        value={item.quantity_damaged}
+                        onChange={(e) => handleItemChange(idx, 'quantity_damaged', e.target.value)}
+                        placeholder="0"
+                        className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none text-center font-mono ${
+                          errors[`item_${idx}_damaged`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-rose-500'
+                        }`}
+                      />
+                      {errors[`item_${idx}_damaged`] && (
+                        <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_damaged`]}</p>
+                      )}
+                    </div>
+
+                    {/* 3. Batch Number */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
+                        Batch No.
+                      </label>
+                      <input
+                        type="text"
+                        value={item.batch_number}
+                        onChange={(e) => handleItemChange(idx, 'batch_number', e.target.value)}
+                        placeholder="e.g. B-01"
+                        className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-600 font-mono"
+                      />
+                    </div>
+
+                    {/* 4. Expiry Date */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
+                        Expiry Date
+                      </label>
+                      <input
+                        type="date"
+                        value={item.expiry_date}
+                        onChange={(e) => handleItemChange(idx, 'expiry_date', e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-2 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-600"
+                      />
+                    </div>
                   </div>
 
-                  {/* 2. Damaged and Defective Qty */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-rose-700 uppercase tracking-wider block truncate" title="Damaged and Defective Qty">
-                      Damaged &amp; Defective Qty
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={item.quantity_received !== '' ? Number(item.quantity_received) : undefined}
-                      value={item.quantity_damaged}
-                      onChange={(e) => handleItemChange(idx, 'quantity_damaged', e.target.value)}
-                      placeholder="0"
-                      className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none text-center font-mono ${
-                        errors[`item_${idx}_damaged`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-rose-500'
-                      }`}
-                    />
-                    {errors[`item_${idx}_damaged`] && (
-                      <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_damaged`]}</p>
-                    )}
+                  {/* Row 2: Physical Bill Rates & Pricing Verification */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-start bg-indigo-50/40 p-3 rounded-xl border border-indigo-100/80">
+                    {/* 5. Purchase Unit Rate (₹) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center justify-between">
+                        <span>Unit Rate (₹) *</span>
+                        <span className="text-[8px] text-indigo-600 font-bold">Physical Bill</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1.5 text-slate-400 text-xs font-bold font-mono">₹</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.purchase_price}
+                          onChange={(e) => {
+                            handleItemChange(idx, 'purchase_price', e.target.value);
+                            if (errors[`item_${idx}_purchase_price`]) {
+                              setErrors((prev) => ({ ...prev, [`item_${idx}_purchase_price`]: null }));
+                            }
+                          }}
+                          placeholder="0.00"
+                          className={`w-full bg-white border rounded-xl pl-6 pr-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none font-mono ${
+                            errors[`item_${idx}_purchase_price`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-600'
+                          }`}
+                        />
+                      </div>
+                      {errors[`item_${idx}_purchase_price`] && (
+                        <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_purchase_price`]}</p>
+                      )}
+                    </div>
+
+                    {/* 6. GST (%) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-indigo-900 uppercase tracking-wider block">
+                        GST (%)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          max="100"
+                          value={item.gst}
+                          onChange={(e) => handleItemChange(idx, 'gst', e.target.value)}
+                          placeholder="0"
+                          className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 font-mono text-center"
+                        />
+                        <span className="absolute right-2.5 top-1.5 text-slate-400 text-xs font-bold">%</span>
+                      </div>
+                    </div>
+
+                    {/* 7. Batch MRP */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                        <span>MRP (₹) *</span>
+                        <span className="text-[8px] text-indigo-600 font-bold">FIFO</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={item.mrp}
+                        onChange={(e) => {
+                          handleItemChange(idx, 'mrp', e.target.value);
+                          if (errors[`item_${idx}_mrp`]) {
+                            setErrors((prev) => ({ ...prev, [`item_${idx}_mrp`]: null }));
+                          }
+                        }}
+                        placeholder="0.00"
+                        className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none font-mono ${
+                          errors[`item_${idx}_mrp`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-600'
+                        }`}
+                      />
+                      {errors[`item_${idx}_mrp`] && (
+                        <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_mrp`]}</p>
+                      )}
+                    </div>
+
+                    {/* 8. Selling Price */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-emerald-700 uppercase tracking-wider flex items-center justify-between">
+                        <span>Selling Price (₹) *</span>
+                        <span className="text-[8px] text-emerald-600 font-bold">Store Price</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={item.selling_price}
+                        onChange={(e) => {
+                          handleItemChange(idx, 'selling_price', e.target.value);
+                          if (errors[`item_${idx}_selling_price`]) {
+                            setErrors((prev) => ({ ...prev, [`item_${idx}_selling_price`]: null }));
+                          }
+                        }}
+                        placeholder="0.00"
+                        className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold text-emerald-700 focus:outline-none font-mono ${
+                          errors[`item_${idx}_selling_price`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-emerald-600'
+                        }`}
+                      />
+                      {errors[`item_${idx}_selling_price`] && (
+                        <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_selling_price`]}</p>
+                      )}
+                    </div>
                   </div>
 
-                  {/* 3. Batch Number */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                      Batch No.
-                    </label>
-                    <input
-                      type="text"
-                      value={item.batch_number}
-                      onChange={(e) => handleItemChange(idx, 'batch_number', e.target.value)}
-                      placeholder="e.g. B-01"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-600 font-mono"
-                    />
-                  </div>
-
-                  {/* 4. Batch MRP */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                      <span>MRP (₹) *</span>
-                      <span className="text-[8px] text-indigo-600 font-bold">FIFO</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={item.mrp}
-                      onChange={(e) => handleItemChange(idx, 'mrp', e.target.value)}
-                      placeholder="0.00"
-                      className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none font-mono ${
-                        errors[`item_${idx}_mrp`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-600'
-                      }`}
-                    />
-                    {errors[`item_${idx}_mrp`] && (
-                      <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_mrp`]}</p>
-                    )}
-                  </div>
-
-                  {/* 5. Selling Price */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-emerald-700 uppercase tracking-wider flex items-center justify-between">
-                      <span>Selling (₹) *</span>
-                      <span className="text-[8px] text-emerald-600 font-bold">FIFO</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={item.selling_price}
-                      onChange={(e) => handleItemChange(idx, 'selling_price', e.target.value)}
-                      placeholder="0.00"
-                      className={`w-full bg-white border rounded-xl px-2.5 py-1.5 text-xs font-bold text-emerald-700 focus:outline-none font-mono ${
-                        errors[`item_${idx}_selling_price`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-emerald-600'
-                      }`}
-                    />
-                    {errors[`item_${idx}_selling_price`] && (
-                      <p className="text-[9px] font-bold text-rose-500 leading-tight">{errors[`item_${idx}_selling_price`]}</p>
-                    )}
-                  </div>
-
-                  {/* 6. Expiry Date */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                      Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      value={item.expiry_date}
-                      onChange={(e) => handleItemChange(idx, 'expiry_date', e.target.value)}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-2 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-600"
-                    />
-                  </div>
                 </div>
 
                 {/* Real-time Calculation & Settlement Strip for Item */}
@@ -415,6 +521,10 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                   const costWithGst = cost * (1 + gstP / 100);
                   const payable = accepted * costWithGst;
                   const deduction = dam * costWithGst;
+                  const sellingP = Number(item.selling_price) || 0;
+                  const marginP = sellingP > 0 && cost > 0
+                    ? (((sellingP - cost) / sellingP) * 100).toFixed(1)
+                    : null;
 
                   return (
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-200/60 text-[11px] font-semibold">
@@ -424,14 +534,21 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                         </span>
                         {dam > 0 && (
                           <span className="text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-md border border-rose-200 font-bold">
-                            Damaged &amp; Defective: <strong className="font-mono">{dam}</strong> units
+                            Damaged: <strong className="font-mono">{dam}</strong> units
+                          </span>
+                        )}
+                        {marginP !== null && (
+                          <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${
+                            Number(marginP) >= 0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}>
+                            Margin: {marginP}%
                           </span>
                         )}
                       </div>
                       <div className="flex flex-wrap items-center gap-3 text-right">
                         {cost > 0 && (
                           <span className="text-slate-500 text-[10px]">
-                            PO Cost: ₹{cost.toFixed(2)} {gstP > 0 ? `(+${gstP}% GST)` : ''}
+                            Cost/Unit: ₹{cost.toFixed(2)} {gstP > 0 ? `(+${gstP}% GST = ₹${costWithGst.toFixed(2)})` : ''}
                           </span>
                         )}
                         {dam > 0 && (
@@ -440,7 +557,7 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                           </span>
                         )}
                         <span className="text-slate-700">
-                          Item Payable: <strong className="text-slate-900 font-mono">₹{payable.toFixed(2)}</strong>
+                          Line Payable: <strong className="text-slate-900 font-mono">₹{payable.toFixed(2)}</strong>
                         </span>
                       </div>
                     </div>
@@ -707,33 +824,45 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
               </div>
             </div>
 
-            {/* Compact Lock PO Checkbox */}
-            <div className="pt-2 border-t border-slate-700/80 mt-2 flex flex-wrap items-center justify-between gap-2">
-              <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-white rounded-lg border border-slate-700 cursor-pointer select-none hover:bg-slate-750 transition-all text-xs font-bold">
-                <input
-                  type="checkbox"
-                  checked={lockPO}
-                  onChange={(e) => setLockPO(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-400 border-slate-600 bg-slate-900 cursor-pointer"
-                />
-                <span className="flex items-center gap-1.5 text-slate-200">
-                  {lockPO ? (
-                    <LockClosedIcon className="w-4 h-4 text-emerald-400 stroke-[2.2]" />
-                  ) : (
-                    <LockOpenIcon className="w-4 h-4 text-amber-400 stroke-[2.2]" />
-                  )}
-                  {lockPO ? 'Finalize & Lock Purchase Order' : 'Keep PO Open (Partially Received)'}
-                </span>
-              </label>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-bold text-slate-400">
-                  {lockPO ? '🔒 PO slip will be locked permanently' : '🔓 Slip stays open for remaining items'}
-                </span>
-                <span className="text-[9px] font-black text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-md tracking-wider">
-                  ⚡ Real-Time Stock &amp; Invoice
-                </span>
-              </div>
+            {/* Shipment Fulfillment & PO Status Indicator */}
+            <div className="pt-3 border-t border-slate-700/80 mt-2">
+              {deliveryStatusInfo.isFullStockArrived ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-emerald-950/70 border border-emerald-500/50 rounded-xl">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircleIcon className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <div>
+                      <span className="text-xs font-black text-white block">
+                        Full Stock Arrived (100% Fulfilled)
+                      </span>
+                      <span className="text-[10px] text-emerald-300 block">
+                        All ordered units received without shortage. Purchase Order will automatically transition to <strong>Completed</strong>.
+                      </span>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white rounded-lg shadow-xs">
+                    <LockClosedIcon className="w-3.5 h-3.5" />
+                    Auto-Complete PO
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-amber-950/70 border border-amber-500/50 rounded-xl">
+                  <div className="flex items-center gap-2.5">
+                    <ExclamationTriangleIcon className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                    <div>
+                      <span className="text-xs font-black text-amber-300 block">
+                        Shipment Incomplete — {deliveryStatusInfo.totalPendingShortageUnits} Units Missing / Pending
+                      </span>
+                      <span className="text-[10px] text-amber-200/90 block">
+                        PO remains open in <strong>"Partially Pending"</strong> status. You can inward the missing stock when the next delivery arrives.
+                      </span>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] font-black uppercase tracking-wider bg-amber-600 text-white rounded-lg shadow-xs">
+                    <LockOpenIcon className="w-3.5 h-3.5" />
+                    Stays Open (Partially Pending)
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         );

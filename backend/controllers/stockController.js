@@ -10,21 +10,40 @@ export const getStockSummary = async (req, res, next) => {
   try {
     const [stock] = await req.db.query(`
       SELECT p.id as product_id, p.id, p.name as product_name, p.barcode, p.sku, p.unit, p.min_stock,
-             c.name as category, sc.name as sub_category, b.name as brand,
+             p.measurement_value,
+             c.name as category, sc.name as sub_category,
+             COALESCE(b.name, p.brand, '') as brand,
              MIN(COALESCE(s.warehouse_id, 1)) as warehouse_id, 
              COALESCE(MIN(w.name), 'Main Storage') as warehouse_name, 
              COALESCE(SUM(s.quantity), 0) as quantity,
              COALESCE(
                (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
                (GREATEST(0, COALESCE(SUM(s.quantity), 0)) * COALESCE(p.purchase_price, 0))
-             ) as stock_valuation
+             ) as stock_valuation,
+             (
+               EXISTS(SELECT 1 FROM purchase_items pi WHERE pi.product_id = p.id)
+               OR EXISTS(SELECT 1 FROM grn_items gi WHERE gi.product_id = p.id)
+             ) as ever_purchased,
+             COALESCE(
+               (SELECT MAX(created_at) FROM stock_logs WHERE product_id = p.id AND (new_quantity <= 0 OR type = 'Stock Out')),
+               (SELECT MAX(created_at) FROM stock_logs WHERE product_id = p.id),
+               MAX(s.updated_at),
+               (SELECT MAX(pu.created_at) FROM purchase_items pki JOIN purchases pu ON pki.purchase_id = pu.id WHERE pki.product_id = p.id)
+             ) as out_of_stock_date
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN sub_categories sc ON p.sub_category_id = sc.id
       LEFT JOIN brands b ON p.brand_id = b.id
       LEFT JOIN stock s ON p.id = s.product_id
       LEFT JOIN warehouses w ON s.warehouse_id = w.id
-      GROUP BY p.id, p.name, p.barcode, p.sku, p.unit, p.min_stock, p.purchase_price, c.name, sc.name, b.name
+      GROUP BY p.id, p.name, p.barcode, p.sku, p.unit, p.measurement_value, p.brand, p.min_stock, p.purchase_price, c.name, sc.name, b.name
+      HAVING (
+        quantity > 0 
+        OR (
+          ever_purchased = 1 
+          AND out_of_stock_date >= DATE_SUB(NOW(), INTERVAL 10 DAY)
+        )
+      )
       ORDER BY p.name ASC
     `);
 
@@ -783,11 +802,11 @@ export const getStockAlerts = async (req, res, next) => {
 // @access  Private
 export const getStockLogs = async (req, res, next) => {
   try {
-    const { productId, type, startDate, endDate, page = 1, limit = 50 } = req.query;
+    const { productId, product_id, type, startDate, endDate, page = 1, limit = 50 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = `
-      SELECT sl.*, p.name as product_name, p.sku, p.barcode, p.unit,
+      SELECT sl.*, p.name as product_name, p.measurement_value, p.sku, p.barcode, p.unit,
              w.name as warehouse_name, u.name as user_name
       FROM stock_logs sl
       JOIN products p ON sl.product_id = p.id
@@ -797,9 +816,16 @@ export const getStockLogs = async (req, res, next) => {
     `;
     const queryParams = [];
 
-    if (productId) {
-      query += ' AND sl.product_id = ?';
-      queryParams.push(productId);
+    const rawProductIds = (productId || product_id || '').toString().trim();
+    if (rawProductIds) {
+      const ids = rawProductIds.split(',').map(id => id.trim()).filter(Boolean);
+      if (ids.length === 1) {
+        query += ' AND sl.product_id = ?';
+        queryParams.push(ids[0]);
+      } else if (ids.length > 1) {
+        query += ` AND sl.product_id IN (${ids.map(() => '?').join(',')})`;
+        queryParams.push(...ids);
+      }
     }
 
     if (type && type !== 'all' && type !== 'All') {

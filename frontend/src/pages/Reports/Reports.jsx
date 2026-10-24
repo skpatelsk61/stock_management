@@ -44,6 +44,7 @@ const Reports = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [timeScale, setTimeScale] = useState('daily'); // 'daily', 'monthly', 'yearly'
+  const [trendChartType, setTrendChartType] = useState('line'); // 'line', 'area'
   
   // Extra filters
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -1043,64 +1044,125 @@ const Reports = () => {
                 
                 {/* Main Trend line/area chart (2/3 width) */}
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm lg:col-span-2">
-                  <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">
-                    {analyticsScope === 'overall' ? 'Revenue, Expenses & Net Profit Trends' : 'Product Sales Volume Trend'}
-                  </h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                    <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                      {analyticsScope === 'overall' ? 'Revenue, Expenses & Net Profit Trends' : 'Product Sales Volume Trend'}
+                    </h3>
+                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg self-start sm:self-auto">
+                      <button
+                        onClick={() => setTrendChartType('line')}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                          trendChartType === 'line'
+                            ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        Line Graph
+                      </button>
+                      <button
+                        onClick={() => setTrendChartType('area')}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                          trendChartType === 'area'
+                            ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        Area Chart
+                      </button>
+                    </div>
+                  </div>
                   <div className="h-72">
                     {analyticsData.charts?.trends && analyticsData.charts.trends.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={analyticsData.charts.trends} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
-                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                            </linearGradient>
-                            <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25}/>
-                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                            </linearGradient>
-                            <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
-                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                            </linearGradient>
-                            <linearGradient id="colorReturns" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
-                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
-                            stroke={isDarkMode ? '#475569' : '#94A3B8'}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
-                            stroke={isDarkMode ? '#475569' : '#94A3B8'}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
-                              borderColor: isDarkMode ? '#334155' : '#E2E8F0',
-                              color: isDarkMode ? '#F8FAFC' : '#0F172A',
-                              borderRadius: '0.75rem',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                            }}
-                            formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN')}`}
-                          />
-                          <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
-                          <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
-                          <Area type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2} fillOpacity={0.15} fill="#8b5cf6" />
-                          {analyticsScope === 'overall' && (
-                            <>
-                              <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
-                              <Area type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorReturns)" />
-                              <Area type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
-                            </>
-                          )}
-                        </AreaChart>
+                        {trendChartType === 'line' ? (
+                          <LineChart data={analyticsData.charts.trends} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
+                            <XAxis
+                              dataKey="label"
+                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                                borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                                color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                borderRadius: '0.75rem',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                              }}
+                              formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN')}`}
+                            />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
+                            <Line type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981' }} activeDot={{ r: 6 }} />
+                            <Line type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 4, fill: '#8b5cf6' }} activeDot={{ r: 6 }} />
+                            {analyticsScope === 'overall' && (
+                              <>
+                                <Line type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={3} dot={{ r: 4, fill: '#ef4444' }} activeDot={{ r: 6 }} />
+                                <Line type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 4, fill: '#f59e0b' }} activeDot={{ r: 6 }} />
+                                <Line type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1' }} activeDot={{ r: 6 }} />
+                              </>
+                            )}
+                          </LineChart>
+                        ) : (
+                          <AreaChart data={analyticsData.charts.trends} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                              </linearGradient>
+                              <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25}/>
+                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                              </linearGradient>
+                              <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
+                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                              </linearGradient>
+                              <linearGradient id="colorReturns" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
+                            <XAxis
+                              dataKey="label"
+                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }}
+                              stroke={isDarkMode ? '#475569' : '#94A3B8'}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                                borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                                color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                borderRadius: '0.75rem',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                              }}
+                              formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN')}`}
+                            />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
+                            <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
+                            <Area type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2} fillOpacity={0.15} fill="#8b5cf6" />
+                            {analyticsScope === 'overall' && (
+                              <>
+                                <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                                <Area type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorReturns)" />
+                                <Area type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
+                              </>
+                            )}
+                          </AreaChart>
+                        )}
                       </ResponsiveContainer>
                     ) : (
                       <div className="flex h-full items-center justify-center text-xs text-slate-400 font-bold">No data matches query filters.</div>
@@ -1114,70 +1176,100 @@ const Reports = () => {
                     <>
                       <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Category Sales Distribution</h3>
                       <div className="h-72 flex flex-col items-center justify-center">
-                        {analyticsData.charts?.categoryDist && analyticsData.charts.categoryDist.length > 0 ? (
-                          <div className="w-full h-full flex flex-col justify-between">
-                            <div className="w-full h-44">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                  <Pie
-                                    data={analyticsData.charts.categoryDist}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={45}
-                                    outerRadius={65}
-                                    paddingAngle={3}
-                                    dataKey="value"
-                                  >
-                                    {analyticsData.charts.categoryDist.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                  </Pie>
-                                  <Tooltip formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`} />
-                                </PieChart>
-                              </ResponsiveContainer>
+                        {(() => {
+                          const categoryDistData = (analyticsData.charts?.categoryDist || [])
+                            .map(c => ({ name: c.name, value: Number(c.value) || 0 }))
+                            .filter(c => c.value > 0);
+
+                          return categoryDistData.length > 0 ? (
+                            <div className="w-full h-full flex flex-col justify-between">
+                              <div className="w-full h-44 flex items-center justify-center">
+                                <ResponsiveContainer width="100%" height={176} minWidth={100} minHeight={176}>
+                                  <PieChart>
+                                    <Pie
+                                      data={categoryDistData}
+                                      cx="50%"
+                                      cy="50%"
+                                      innerRadius={45}
+                                      outerRadius={68}
+                                      paddingAngle={categoryDistData.length > 1 ? 4 : 0}
+                                      dataKey="value"
+                                      nameKey="name"
+                                      isAnimationActive={false}
+                                    >
+                                      {categoryDistData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                      ))}
+                                    </Pie>
+                                    <Tooltip 
+                                      formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Sales Revenue']}
+                                      contentStyle={{
+                                        backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                                        borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                                        color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                        borderRadius: '0.75rem',
+                                        fontSize: '11px',
+                                        fontWeight: '600',
+                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                                      }}
+                                    />
+                                  </PieChart>
+                                </ResponsiveContainer>
+                              </div>
+                              <div className="w-full max-h-24 overflow-y-auto space-y-1.5 text-[11px] font-bold scrollbar-thin">
+                                {categoryDistData.slice(0, 5).map((cat, idx) => (
+                                  <div key={idx} className="flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 truncate">
+                                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                      <span className="truncate">{cat.name}</span>
+                                    </span>
+                                    <span className="text-slate-900 dark:text-white shrink-0 ml-2">₹{Number(cat.value).toLocaleString('en-IN')}</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                            <div className="w-full max-h-24 overflow-y-auto space-y-1.5 text-[11px] font-bold scrollbar-thin">
-                              {analyticsData.charts.categoryDist.slice(0, 5).map((cat, idx) => (
-                                <div key={idx} className="flex items-center justify-between">
-                                  <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
-                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                                    {cat.name}
-                                  </span>
-                                  <span className="text-slate-900 dark:text-white">₹{Number(cat.value).toLocaleString('en-IN')}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-xs text-slate-400 font-semibold">No category distribution data.</div>
-                        )}
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-xs text-slate-400 font-semibold">No category distribution data.</div>
+                          );
+                        })()}
                       </div>
                     </>
                   ) : (
                     <>
                       <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Quantity Traded Share</h3>
                       <div className="h-72 flex flex-col items-center justify-center">
-                        <div className="w-full h-44">
-                          <ResponsiveContainer width="100%" height="100%">
+                        <div className="w-full h-44 flex items-center justify-center">
+                          <ResponsiveContainer width="100%" height={176} minWidth={100} minHeight={176}>
                             <PieChart>
                               <Pie
                                 data={[
-                                  { name: 'Sold', value: analyticsData.kpis?.unitsSold || 0 },
-                                  { name: 'Purchased', value: analyticsData.kpis?.unitsPurchased || 0 },
-                                  { name: 'Stock', value: analyticsData.kpis?.currentStock || 0 }
+                                  { name: 'Sold', value: Number(analyticsData.kpis?.unitsSold) || 0 },
+                                  { name: 'Purchased', value: Number(analyticsData.kpis?.unitsPurchased) || 0 },
+                                  { name: 'Stock', value: Number(analyticsData.kpis?.currentStock) || 0 }
                                 ]}
                                 cx="50%"
                                 cy="50%"
                                 innerRadius={45}
-                                outerRadius={65}
+                                outerRadius={68}
                                 paddingAngle={3}
                                 dataKey="value"
+                                isAnimationActive={false}
                               >
                                 <Cell fill="#10b981" />
                                 <Cell fill="#f59e0b" />
                                 <Cell fill="#3b82f6" />
                               </Pie>
-                              <Tooltip />
+                              <Tooltip
+                                formatter={(value) => [`${Number(value)} Pcs`, 'Units']}
+                                contentStyle={{
+                                  backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                                  borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                                  color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                  borderRadius: '0.75rem',
+                                  fontSize: '11px',
+                                  fontWeight: '600'
+                                }}
+                              />
                             </PieChart>
                           </ResponsiveContainer>
                         </div>

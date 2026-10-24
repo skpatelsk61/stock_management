@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   UserGroupIcon,
   CalendarIcon,
@@ -12,19 +12,26 @@ import {
   CurrencyRupeeIcon,
   InformationCircleIcon,
   CheckCircleIcon,
-  SparklesIcon
+  SparklesIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  MagnifyingGlassIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { vendorsAPI, productsAPI, categoriesAPI } from '../../services/api';
 
 const normProduct = (p) => ({
   id: p.id,
   name: p.name,
+  brand: p.brand || p.brand_name || '',
+  measurement_value: p.measurement_value || '',
   barcode: p.barcode || p.bar_code || '',
   category: p.category_name || p.category || 'General',
   category_id: p.category_id || p.categoryId || '',
   purchasePrice: Number(p.purchase_price ?? p.purchasePrice ?? 0),
   unit: p.unit || 'Pcs',
   gst: Number(p.gst ?? 0),
+  total_stock: Number(p.total_stock ?? p.currentStock ?? p.quantity ?? 0),
 });
 
 const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
@@ -43,10 +50,24 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedProduct, setSelectedProduct] = useState('');
   const [quantity, setQuantity] = useState('');
-  const [customPrice, setCustomPrice] = useState('');
-  const [itemGst, setItemGst] = useState(0);
-  const [manualGst, setManualGst] = useState('');
   const [errors, setErrors] = useState({});
+
+  // Tree Dropdown interactive states
+  const dropdownRef = useRef(null);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [productSearch, setProductSearch] = useState('');
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const loadFormData = async () => {
@@ -88,11 +109,82 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
       })
     : dbProducts;
 
+  // Group filtered products by product name (brand) for tree structure
+  const groupedProducts = useMemo(() => {
+    const groups = {};
+    filteredProducts.forEach((p) => {
+      const brandStr = (p.brand || '').trim();
+      const nameStr = (p.name || '').trim();
+      const grpKey = `${nameStr.toLowerCase()}__${brandStr.toLowerCase()}`;
+      const displayName = brandStr ? `${nameStr} (${brandStr})` : nameStr;
+
+      if (!groups[grpKey]) {
+        groups[grpKey] = {
+          key: grpKey,
+          name: nameStr,
+          brand: brandStr,
+          displayName,
+          variants: []
+        };
+      }
+      groups[grpKey].variants.push(p);
+    });
+    return Object.values(groups);
+  }, [filteredProducts]);
+
+  const selectedProductObj = useMemo(() => {
+    return dbProducts.find((p) => String(p.id) === String(selectedProduct));
+  }, [dbProducts, selectedProduct]);
+
+  const toggleGroupCollapse = (key, e) => {
+    if (e) e.stopPropagation();
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleToggleAllGroups = () => {
+    const allCollapsed = groupedProducts.every((g) => collapsedGroups[g.key]);
+    if (allCollapsed) {
+      setCollapsedGroups({}); // expand all
+    } else {
+      const all = {};
+      groupedProducts.forEach((g) => { all[g.key] = true; });
+      setCollapsedGroups(all); // collapse all
+    }
+  };
+
+  const handleSelectVariant = (variantId) => {
+    if (String(selectedProduct) === String(variantId)) {
+      // Toggle off / Unselect
+      setSelectedProduct('');
+    } else {
+      setSelectedProduct(variantId);
+      setIsProductDropdownOpen(false);
+      if (errors.items) setErrors((prev) => ({ ...prev, items: null }));
+    }
+  };
+
+  const searchedGroupedProducts = useMemo(() => {
+    if (!productSearch.trim()) return groupedProducts;
+    const q = productSearch.toLowerCase().trim();
+    return groupedProducts.filter((grp) => {
+      const matchGroup = grp.displayName.toLowerCase().includes(q);
+      const matchVariant = grp.variants.some(
+        (v) =>
+          (v.measurement_value && v.measurement_value.toLowerCase().includes(q)) ||
+          (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+          v.name.toLowerCase().includes(q)
+      );
+      return matchGroup || matchVariant;
+    });
+  }, [groupedProducts, productSearch]);
+
   const handleCategoryChange = (catVal) => {
     setSelectedCategory(catVal);
     setSelectedProduct('');
-    setCustomPrice('');
-    setItemGst(0);
+    setProductSearch('');
   };
 
   const handleAddItem = () => {
@@ -104,14 +196,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     const product = dbProducts.find((p) => String(p.id) === String(selectedProduct));
     if (!product) return;
 
-    if (customPrice === '' || isNaN(parseFloat(customPrice)) || parseFloat(customPrice) < 0) {
-      setErrors((prev) => ({ ...prev, items: 'Please enter a valid purchase price (₹).' }));
-      return;
-    }
-
-    const price = parseFloat(customPrice);
-    const qty = Number(quantity) || 1;
-    const gstRate = parseFloat(itemGst) >= 0 ? parseFloat(itemGst) : 0;
+    const qty = Math.max(1, Number(quantity) || 1);
 
     // Clear item errors
     setErrors((prev) => ({ ...prev, items: null }));
@@ -124,22 +209,20 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     if (existsIndex > -1) {
       const updated = [...formData.items];
       updated[existsIndex].quantity += qty;
-      updated[existsIndex].gst = gstRate;
-      updated[existsIndex].purchase_price = price;
-      updated[existsIndex].total = updated[existsIndex].quantity * updated[existsIndex].purchase_price * (1 + gstRate / 100);
       setFormData({ ...formData, items: updated });
     } else {
-      const total = price * qty * (1 + gstRate / 100);
       const newItem = {
         product_id: product.id,
         name: product.name,
+        brand: product.brand,
+        measurement_value: product.measurement_value,
         barcode: product.barcode,
         category: product.category,
         quantity: qty,
-        purchase_price: price,
-        gst: gstRate,
-        unit: product.unit,
-        total,
+        purchase_price: 0,
+        gst: 0,
+        unit: product.unit || 'Pcs',
+        total: 0,
       };
       setFormData({ ...formData, items: [...formData.items, newItem] });
     }
@@ -147,8 +230,6 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     // Reset item input
     setSelectedProduct('');
     setQuantity('');
-    setCustomPrice('');
-    setItemGst(0);
   };
 
   const handleItemChange = (index, field, value) => {
@@ -157,15 +238,8 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
 
     if (field === 'quantity') {
       item.quantity = Math.max(1, Number(value) || 1);
-    } else if (field === 'purchase_price') {
-      const p = parseFloat(value);
-      item.purchase_price = isNaN(p) || p < 0 ? 0 : p;
-    } else if (field === 'gst') {
-      const g = parseFloat(value);
-      item.gst = isNaN(g) || g < 0 ? 0 : g;
     }
 
-    item.total = item.purchase_price * item.quantity * (1 + (item.gst || 0) / 100);
     updated[index] = item;
     setFormData({ ...formData, items: updated });
   };
@@ -175,43 +249,10 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     setFormData({ ...formData, items: updated });
   };
 
-  const calculateTotals = () => {
-    let subtotal = 0;
-    let autoGstAmount = 0;
-
-    formData.items.forEach((item) => {
-      const base = Number(item.purchase_price || 0) * Number(item.quantity || 0);
-      subtotal += base;
-      autoGstAmount += base * ((Number(item.gst) || 0) / 100);
-    });
-
-    const gstAmount = manualGst !== '' && !isNaN(parseFloat(manualGst))
-      ? Math.max(0, parseFloat(manualGst))
-      : autoGstAmount;
-
-    const total = subtotal + gstAmount;
-
-    return {
-      subtotal,
-      autoGstAmount,
-      gstAmount,
-      total,
-    };
-  };
-
-  const { subtotal, autoGstAmount, gstAmount, total } = calculateTotals();
-
-  const handleProductSelect = (prodId) => {
-    setSelectedProduct(prodId);
-    const p = dbProducts.find((x) => String(x.id) === String(prodId));
-    if (p) {
-      setCustomPrice(p.purchasePrice > 0 ? p.purchasePrice.toString() : '');
-      setItemGst(p.gst !== undefined && p.gst !== null ? p.gst : 0);
-    } else {
-      setCustomPrice('');
-      setItemGst(0);
-    }
-  };
+  const totalOrderedUnits = formData.items.reduce(
+    (sum, item) => sum + (Number(item.quantity) || 0),
+    0
+  );
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -229,12 +270,17 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
       warehouse_id: Number(formData.warehouseId),
       date: formData.date,
       expected_delivery_date: formData.expectedDeliveryDate || null,
-      subtotal,
+      subtotal: 0,
       discount: 0,
-      gst_amount: gstAmount,
-      total,
+      gst_amount: 0,
+      total: 0,
       notes: formData.notes,
-      items: formData.items,
+      items: formData.items.map((item) => ({
+        ...item,
+        purchase_price: 0,
+        gst: 0,
+        total: 0,
+      })),
     });
   };
 
@@ -348,9 +394,14 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
             <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
               <ShoppingBagIcon className="w-4 h-4 stroke-[2.2]" />
             </div>
-            <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-              Add Products & Pricing Lines
-            </h3>
+            <div>
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                Select Products &amp; Order Quantities
+              </h3>
+              <p className="text-[11px] font-semibold text-slate-400">
+                Purchase rates &amp; GST are recorded upon delivery and invoice verification (GRN).
+              </p>
+            </div>
           </div>
           {filteredProducts.length > 0 && (
             <span className="text-[11px] font-bold text-slate-400">
@@ -362,7 +413,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-end">
           
           {/* 1. Category Filter */}
-          <div className="sm:col-span-3 space-y-1.5">
+          <div className="sm:col-span-4 space-y-1.5">
             <label className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
               <FunnelIcon className="w-3.5 h-3.5 text-indigo-500" />
               Product Category
@@ -381,55 +432,299 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
             </select>
           </div>
 
-          {/* 2. Product Selection */}
-          <div className="sm:col-span-3 space-y-1.5">
-            <label className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
-              <TagIcon className="w-3.5 h-3.5 text-indigo-500" />
-              Product Name <span className="text-rose-500">*</span>
+          {/* 2. Product Selection (Expandable Tree with Scrollbar) */}
+          <div className="sm:col-span-5 space-y-1.5 relative" ref={dropdownRef}>
+            <label className="text-[11px] font-extrabold text-slate-700 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <TagIcon className="w-3.5 h-3.5 text-indigo-500" />
+                Product Name <span className="text-rose-500">*</span>
+              </span>
+              {selectedProduct && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedProduct('')}
+                  className="text-[10px] text-slate-400 hover:text-rose-600 font-bold flex items-center gap-0.5 cursor-pointer"
+                >
+                  <XMarkIcon className="w-3 h-3" /> Clear
+                </button>
+              )}
             </label>
-            <select
-              value={selectedProduct}
-              onChange={(e) => handleProductSelect(e.target.value)}
-              className="w-full bg-slate-50/80 border border-slate-200 hover:border-indigo-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all cursor-pointer"
+
+            {/* Custom Trigger Button */}
+            <button
+              type="button"
+              onClick={() => setIsProductDropdownOpen((prev) => !prev)}
+              className="w-full bg-slate-50/80 hover:bg-slate-100/80 border border-slate-200 hover:border-indigo-400 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all flex items-center justify-between cursor-pointer shadow-2xs text-left"
             >
-              <option value="">
-                {selectedCategory && filteredProducts.length === 0
-                  ? '-- No Products in Category --'
-                  : '-- Choose Product --'}
-              </option>
-              {filteredProducts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} {p.barcode ? `(${p.barcode})` : ''}
-                </option>
-              ))}
-            </select>
+              <div className="flex items-center gap-2 truncate">
+                {selectedProductObj ? (
+                  <span className="truncate text-slate-900 font-extrabold flex items-center gap-1.5">
+                    <span>
+                      {selectedProductObj.brand ? `${selectedProductObj.name} (${selectedProductObj.brand})` : selectedProductObj.name}
+                    </span>
+                    <span className="text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                      {selectedProductObj.measurement_value || selectedProductObj.unit}
+                    </span>
+                    {Number(selectedProductObj.total_stock || 0) <= 0 ? (
+                      <span className="text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                        Out of Stock
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                        Stock: {selectedProductObj.total_stock}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 font-medium">
+                    {selectedCategory && filteredProducts.length === 0
+                      ? '-- No Products in Category --'
+                      : '-- Choose Product to Order --'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0 ml-2">
+                {selectedProduct && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedProduct('');
+                    }}
+                    className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                    title="Unselect Product"
+                  >
+                    <XMarkIcon className="w-4 h-4" />
+                  </span>
+                )}
+                <ChevronDownIcon
+                  className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
+                    isProductDropdownOpen ? 'rotate-180 text-indigo-600' : ''
+                  }`}
+                />
+              </div>
+            </button>
+
+            {/* Tree Dropdown Menu Popover */}
+            {isProductDropdownOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-fadeIn">
+                
+                {/* Search & Bulk Expand Header */}
+                <div className="p-2 border-b border-slate-100 bg-slate-50/80 space-y-2">
+                  <div className="relative">
+                    <MagnifyingGlassIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      placeholder="Search product name, brand or weight..."
+                      className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                    />
+                    {productSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setProductSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <XMarkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 px-1">
+                    <span>
+                      {searchedGroupedProducts.length} Product Group{searchedGroupedProducts.length === 1 ? '' : 's'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleToggleAllGroups}
+                      className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                    >
+                      {groupedProducts.every((g) => collapsedGroups[g.key]) ? 'Expand All' : 'Collapse All'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Product Banner with Unselect Action */}
+                {selectedProductObj && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-50 border-b border-indigo-100 text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] uppercase font-extrabold text-indigo-700 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded shrink-0">
+                        Selected
+                      </span>
+                      <span className="font-extrabold text-indigo-950 truncate">
+                        {selectedProductObj.name} {selectedProductObj.brand ? `(${selectedProductObj.brand})` : ''} - {selectedProductObj.measurement_value || selectedProductObj.unit}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProduct('')}
+                      className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-md cursor-pointer transition-colors shrink-0 ml-2"
+                      title="Unselect product"
+                    >
+                      <XMarkIcon className="w-3.5 h-3.5" />
+                      Unselect
+                    </button>
+                  </div>
+                )}
+
+                {/* Scrollable Tree List */}
+                <div className="max-h-[250px] overflow-y-auto custom-scrollbar p-2 space-y-1.5">
+                  {searchedGroupedProducts.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 font-medium text-xs">
+                      No matching products found.
+                    </div>
+                  ) : (
+                    searchedGroupedProducts.map((grp) => {
+                      const isCollapsed = Boolean(collapsedGroups[grp.key]);
+                      const hasSelectedVariant = grp.variants.some((v) => String(v.id) === String(selectedProduct));
+
+                      return (
+                        <div
+                          key={grp.key}
+                          className={`border rounded-xl overflow-hidden transition-colors ${
+                            hasSelectedVariant
+                              ? 'border-indigo-300 bg-indigo-50/20 shadow-xs'
+                              : 'border-slate-200/80 bg-white shadow-2xs'
+                          }`}
+                        >
+                          {/* Parent Product Group Header (Clickable open/close toggle for all products) */}
+                          <div
+                            onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                            className={`flex items-center justify-between px-3 py-2 text-xs font-bold cursor-pointer transition-colors ${
+                              isCollapsed
+                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-800'
+                                : 'bg-indigo-50/50 hover:bg-indigo-50/70 text-indigo-950'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                type="button"
+                                onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                className="p-1 rounded-md text-slate-500 hover:text-indigo-700 hover:bg-indigo-100/60 transition-colors"
+                                title={isCollapsed ? 'Open (Expand)' : 'Close (Collapse)'}
+                              >
+                                {isCollapsed ? (
+                                  <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                                ) : (
+                                  <ChevronDownIcon className="w-3.5 h-3.5 stroke-[2.5] text-indigo-600" />
+                                )}
+                              </button>
+
+                              <span className="font-extrabold text-slate-900 tracking-tight truncate">
+                                {grp.displayName}
+                              </span>
+
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100/70 text-indigo-700 border border-indigo-200 shrink-0">
+                                {grp.variants.length} {grp.variants.length === 1 ? 'Weight' : 'Weights'}
+                              </span>
+
+                              {hasSelectedVariant && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                                  Selected
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 text-slate-400 text-[11px] font-semibold">
+                              <span>{isCollapsed ? 'Open' : 'Close'}</span>
+                            </div>
+                          </div>
+
+                          {/* Child Weight Variants (Visible when group is open/expanded) */}
+                          {!isCollapsed && (
+                            <div className="divide-y divide-slate-100 bg-white">
+                              {grp.variants.map((v, idx) => {
+                                const isLast = idx === grp.variants.length - 1;
+                                const isSelected = String(selectedProduct) === String(v.id);
+                                const stockQty = Number(v.total_stock || 0);
+
+                                return (
+                                  <div
+                                    key={v.id}
+                                    onClick={() => handleSelectVariant(v.id)}
+                                    className={`flex items-center justify-between px-3 py-2 pl-7 text-xs font-semibold cursor-pointer transition-colors ${
+                                      isSelected
+                                        ? 'bg-indigo-600 text-white font-bold'
+                                        : 'hover:bg-slate-50 text-slate-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`font-mono text-xs select-none ${
+                                          isSelected ? 'text-indigo-200' : 'text-slate-400'
+                                        }`}
+                                      >
+                                        {grp.variants.length > 1 ? (isLast ? '└──' : '├──') : '└──'}
+                                      </span>
+
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                                          isSelected
+                                            ? 'bg-white/20 text-white border-white/30'
+                                            : 'bg-amber-50 text-amber-950 border-amber-200'
+                                        }`}
+                                      >
+                                        Weight: <strong>{v.measurement_value || v.unit || 'Standard'}</strong>
+                                      </span>
+
+                                      {v.barcode && (
+                                        <span
+                                          className={`text-[10px] font-mono ${
+                                            isSelected ? 'text-indigo-200' : 'text-slate-400'
+                                          }`}
+                                        >
+                                          ({v.barcode})
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                      {stockQty <= 0 ? (
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                            isSelected
+                                              ? 'bg-white/20 text-white border-white/30'
+                                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                                          }`}
+                                        >
+                                          Out of Stock
+                                        </span>
+                                      ) : (
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                            isSelected
+                                              ? 'bg-white/20 text-white border-white/30'
+                                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          }`}
+                                        >
+                                          Stock: {stockQty}
+                                        </span>
+                                      )}
+
+                                      {isSelected ? (
+                                        <div className="flex items-center gap-1 bg-white/25 px-1.5 py-0.5 rounded text-[10px] font-extrabold text-white">
+                                          <CheckCircleIcon className="w-3.5 h-3.5" />
+                                          <span>Click to unselect</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* 3. Purchase Price */}
-          <div className="sm:col-span-2 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-extrabold text-slate-700">
-                Unit Rate (₹) <span className="text-rose-500">*</span>
-              </label>
-            </div>
-            <div className="relative">
-              <span className="absolute left-3 top-2.5 text-slate-400 text-xs font-bold">₹</span>
-              <input
-                type="number"
-                step="any"
-                min="0"
-                value={customPrice}
-                onChange={(e) => {
-                  setCustomPrice(e.target.value);
-                  if (errors.items) setErrors((prev) => ({ ...prev, items: null }));
-                }}
-                placeholder="0.00"
-                className="w-full bg-slate-50/80 border border-slate-200 hover:border-indigo-300 rounded-xl pl-7 pr-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all"
-              />
-            </div>
-          </div>
-
-          {/* 4. Quantity */}
+          {/* 3. Quantity */}
           <div className="sm:col-span-2 space-y-1.5">
             <label className="text-[11px] font-extrabold text-slate-700">Quantity</label>
             <input
@@ -442,22 +737,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
             />
           </div>
 
-          {/* 5. GST % */}
-          <div className="sm:col-span-1 space-y-1.5">
-            <label className="text-[11px] font-extrabold text-slate-700">GST %</label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="any"
-              value={itemGst}
-              onChange={(e) => setItemGst(e.target.value)}
-              placeholder="0"
-              className="w-full bg-slate-50/80 border border-slate-200 hover:border-indigo-300 rounded-xl px-2 py-2 text-xs font-bold text-center text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all"
-            />
-          </div>
-
-          {/* Add Button */}
+          {/* 4. Add Button */}
           <div className="sm:col-span-1">
             <button
               type="button"
@@ -484,7 +764,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
               <ShoppingBagIcon className="w-5 h-5 stroke-[2]" />
             </div>
             <p className="text-xs font-bold text-slate-600">No products added to this purchase order yet</p>
-            <p className="text-[11px] text-slate-400">Select a category and product above to add order line items.</p>
+            <p className="text-[11px] text-slate-400">Select category, product, and quantity above to create order indent lines.</p>
           </div>
         ) : (
           <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs mt-3">
@@ -494,10 +774,9 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
                   <th className="py-3 px-4 text-center">#</th>
                   <th className="py-3 px-4">Product Details</th>
                   <th className="py-3 px-4 text-center">Category</th>
-                  <th className="py-3 px-4 text-center">Quantity</th>
-                  <th className="py-3 px-4 text-right">Unit Rate</th>
-                  <th className="py-3 px-4 text-center">GST %</th>
-                  <th className="py-3 px-4 text-right">Total Line Amount</th>
+                  <th className="py-3 px-4 text-center">Ordered Qty</th>
+                  <th className="py-3 px-4 text-center">Unit</th>
+                  <th className="py-3 px-4 text-center">Pricing Status</th>
                   <th className="py-3 px-4 text-center">Action</th>
                 </tr>
               </thead>
@@ -506,7 +785,16 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
                   <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3 px-4 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
                     <td className="py-3 px-4">
-                      <p className="font-bold text-slate-900">{item.name}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-bold text-slate-900">
+                          {item.brand ? `${item.name} (${item.brand})` : item.name}
+                        </p>
+                        {item.measurement_value && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-50 text-amber-900 border border-amber-200">
+                            Weight: {item.measurement_value}
+                          </span>
+                        )}
+                      </div>
                       {item.barcode && (
                         <span className="text-[10px] font-semibold text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded mt-0.5 inline-block">
                           SKU: {item.barcode}
@@ -525,33 +813,17 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
                           min="1"
                           value={item.quantity}
                           onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                          className="w-14 bg-white border border-slate-200 rounded-lg px-2 py-1 text-center font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                          className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-center font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
                         />
-                        <span className="text-[10px] font-bold text-slate-400">{item.unit || 'Pcs'}</span>
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-right tabular-nums">
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={item.purchase_price}
-                        onChange={(e) => handleItemChange(idx, 'purchase_price', e.target.value)}
-                        className="w-20 bg-white border border-slate-200 rounded-lg px-2 py-1 text-right font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
-                      />
+                    <td className="py-3 px-4 text-center">
+                      <span className="text-xs font-bold text-slate-500">{item.unit || 'Pcs'}</span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={item.gst}
-                        onChange={(e) => handleItemChange(idx, 'gst', e.target.value)}
-                        className="w-12 bg-white border border-slate-200 rounded-lg px-1.5 py-1 text-center font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
-                      />
-                    </td>
-                    <td className="py-3 px-4 text-right font-extrabold text-slate-900 tabular-nums">
-                      ₹{item.total.toFixed(2)}
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200/80 rounded-lg text-[10px] font-bold">
+                        Rate &amp; GST on Delivery
+                      </span>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
@@ -571,14 +843,14 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
         )}
       </div>
 
-      {/* 3. Bottom Section: Notes & Summary Financial Breakdown */}
+      {/* 3. Bottom Section: Notes & Order Indent Summary */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
         
         {/* Left: Notes */}
         <div className="md:col-span-7 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs space-y-2">
           <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
             <DocumentTextIcon className="w-4 h-4 text-indigo-500" />
-            Supplier Instructions & Terms (Optional)
+            Supplier Instructions &amp; Terms (Optional)
           </label>
           <textarea
             value={formData.notes}
@@ -589,51 +861,37 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
           />
         </div>
 
-        {/* Right: Financial Totals Breakdown */}
-        <div className="md:col-span-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl p-5 shadow-md space-y-3">
+        {/* Right: Order Indent Summary */}
+        <div className="md:col-span-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl p-5 shadow-md space-y-3.5">
           <div className="flex items-center justify-between border-b border-indigo-800/60 pb-2.5">
             <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
-              <CurrencyRupeeIcon className="w-4 h-4 text-indigo-400" />
-              Order Calculation
+              <ShoppingBagIcon className="w-4 h-4 text-indigo-400" />
+              Order Indent Summary
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-900/80 text-indigo-200 border border-indigo-700 rounded-full">
-              {formData.items.length} Item Lines
+            <span className="text-[10px] font-bold px-2.5 py-0.5 bg-indigo-900/80 text-indigo-200 border border-indigo-700 rounded-full">
+              {formData.items.length} Product Lines
             </span>
           </div>
 
-          <div className="space-y-2 text-xs font-semibold text-slate-300">
+          <div className="space-y-2.5 text-xs font-semibold text-slate-300">
             <div className="flex justify-between items-center">
-              <span>Subtotal (Base Price):</span>
-              <span className="font-mono font-bold text-white">₹{subtotal.toFixed(2)}</span>
+              <span>Total Distinct Products:</span>
+              <span className="font-mono font-bold text-white">{formData.items.length}</span>
             </div>
 
-            <div className="flex justify-between items-center gap-2">
-              <span className="text-slate-300">Tax / GST Amount:</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-400 font-mono">₹</span>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={manualGst !== '' ? manualGst : (autoGstAmount > 0 ? autoGstAmount.toFixed(2) : '0')}
-                  onChange={(e) => setManualGst(e.target.value)}
-                  placeholder="0.00"
-                  className="w-24 bg-indigo-900/90 border border-indigo-700/80 rounded-lg px-2 py-1 text-right text-xs font-bold font-mono text-white focus:outline-none focus:border-indigo-400"
-                />
-              </div>
+            <div className="flex justify-between items-center">
+              <span>Total Units to Order:</span>
+              <span className="font-mono font-bold text-emerald-400 text-sm">{totalOrderedUnits} Units</span>
+            </div>
+
+            <div className="flex justify-between items-center text-[11px] text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-xl p-2.5">
+              <span>Billing Status:</span>
+              <span className="font-bold text-amber-200 text-right">Pending Bill Verification (GRN)</span>
             </div>
           </div>
 
-          <div className="border-t border-indigo-800/80 pt-3 flex justify-between items-center">
-            <div>
-              <div className="text-xs font-extrabold text-indigo-200">Estimated Total</div>
-              <div className="text-[10px] text-slate-400">Inclusive of taxes</div>
-            </div>
-            <div className="text-right">
-              <span className="text-xl font-black font-mono text-emerald-400">
-                ₹{total.toFixed(2)}
-              </span>
-            </div>
+          <div className="border-t border-indigo-800/80 pt-2.5 text-[10px] text-slate-400 leading-relaxed">
+            Final purchase unit rates, GST %, selling prices, and MRP will be verified and added when goods arrive at the store.
           </div>
         </div>
 

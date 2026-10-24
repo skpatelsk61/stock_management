@@ -57,6 +57,7 @@ const ProductList = () => {
   const [activeActionsMenu, setActiveActionsMenu] = useState(null);
   const [dbOffline, setDbOffline] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedVariantIds, setSelectedVariantIds] = useState({});
 
   // Search & Filter state variables
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,17 +80,19 @@ const ProductList = () => {
   const fetchProductsAndCategories = async () => {
     setLoading(true);
     try {
-      try {
-        const catData = await categoriesAPI.getAll();
-        if (catData.success) {
-          setCategoriesList(Array.isArray(catData.categories) ? catData.categories : []);
-        }
-      } catch (categoryError) {
-        console.warn('Category list could not be loaded. Product registry will still load.', categoryError);
+      const [catData, prodData] = await Promise.all([
+        categoriesAPI.getAll().catch(err => {
+          console.warn('Category list could not be loaded.', err);
+          return { success: false, categories: [] };
+        }),
+        productsAPI.getAll()
+      ]);
+
+      if (catData?.success && Array.isArray(catData.categories)) {
+        setCategoriesList(catData.categories);
       }
       
-      const prodData = await productsAPI.getAll();
-      if (prodData.success) {
+      if (prodData?.success) {
         const today = new Date();
         const productRows = Array.isArray(prodData.products) ? prodData.products : [];
         const mapped = productRows.map((p) => {
@@ -157,22 +160,40 @@ const ProductList = () => {
 
   useEffect(() => {
     fetchProductsAndCategories();
-    const handleFocus = () => {
-      fetchProductsAndCategories();
+
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchProductsAndCategories();
+      }, 350);
     };
+
+    const handleFocus = () => {
+      // Throttle window focus refetching to max once every 60s
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        fetchProductsAndCategories();
+      }
+    };
+
     window.addEventListener('focus', handleFocus);
-    window.addEventListener('stock-changed', handleFocus);
-    window.addEventListener('inventory-updated', handleFocus);
-    window.addEventListener('category-updated', handleFocus);
-    window.addEventListener('brand-updated', handleFocus);
-    window.addEventListener('products-updated', handleFocus);
+    window.addEventListener('stock-changed', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
+    window.addEventListener('category-updated', handleDebouncedUpdate);
+    window.addEventListener('brand-updated', handleDebouncedUpdate);
+    window.addEventListener('products-updated', handleDebouncedUpdate);
+
     return () => {
+      clearTimeout(debounceTimer);
       window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('stock-changed', handleFocus);
-      window.removeEventListener('inventory-updated', handleFocus);
-      window.removeEventListener('category-updated', handleFocus);
-      window.removeEventListener('brand-updated', handleFocus);
-      window.removeEventListener('products-updated', handleFocus);
+      window.removeEventListener('stock-changed', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
+      window.removeEventListener('category-updated', handleDebouncedUpdate);
+      window.removeEventListener('brand-updated', handleDebouncedUpdate);
+      window.removeEventListener('products-updated', handleDebouncedUpdate);
     };
   }, []);
 
@@ -276,13 +297,81 @@ const ProductList = () => {
     return output;
   }, [products, searchQuery, categoryFilter, brandFilter, statusFilter, priceRange, sortBy]);
 
-  // Paginated viewport products
-  const paginatedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * rowsPerPage;
-    return processedProducts.slice(startIndex, startIndex + rowsPerPage);
-  }, [processedProducts, currentPage, rowsPerPage]);
+  // Group products by product name and brand so different brands create their own rows with weight dropdown
+  const groupedProducts = useMemo(() => {
+    const groupsMap = new Map();
 
-  const totalPages = Math.ceil(processedProducts.length / rowsPerPage) || 1;
+    processedProducts.forEach((prod) => {
+      const nameClean = (prod.name || '').trim();
+      const brandClean = (prod.brand || '').trim();
+      const nameKey = nameClean.toLowerCase();
+      const brandKey = brandClean.toLowerCase();
+      const key = `${nameKey}__${brandKey}`;
+
+      if (!groupsMap.has(key)) {
+        const hasBrand = brandClean && brandKey !== 'n/a';
+        const alreadyHasParentheses = hasBrand && nameKey.includes(`(${brandKey})`);
+        const displayName = hasBrand && !alreadyHasParentheses
+          ? `${nameClean} (${brandClean})`
+          : nameClean;
+
+        groupsMap.set(key, {
+          groupKey: key,
+          name: nameClean,
+          displayName: displayName,
+          category: prod.category,
+          sub_category: prod.sub_category,
+          brand: prod.brand,
+          variants: []
+        });
+      }
+      groupsMap.get(key).variants.push(prod);
+    });
+
+    const groups = Array.from(groupsMap.values());
+
+    // Sort variants inside each group by weight numeric value if possible
+    groups.forEach((g) => {
+      g.variants.sort((a, b) => {
+        const parseWeight = (str) => {
+          if (!str) return 0;
+          const m = String(str).match(/([0-9]+(?:\.[0-9]+)?)/);
+          if (!m) return 0;
+          let val = parseFloat(m[1]);
+          if (/kg|l/i.test(str)) val *= 1000;
+          return val;
+        };
+        const wA = parseWeight(a.measurement_value || a.unit);
+        const wB = parseWeight(b.measurement_value || b.unit);
+        if (wA !== wB && wA > 0 && wB > 0) return wA - wB;
+        return a.id - b.id;
+      });
+    });
+
+    return groups;
+  }, [processedProducts]);
+
+  // Helper to get active variant for a group (prioritizing search query match if any)
+  const getActiveVariant = (group) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matched = group.variants.find(v => 
+        (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+        (v.measurement_value && v.measurement_value.toLowerCase().includes(q))
+      );
+      if (matched) return matched;
+    }
+    const selectedId = selectedVariantIds[group.groupKey];
+    return group.variants.find(v => v.id === selectedId) || group.variants[0];
+  };
+
+  // Paginated viewport grouped products
+  const paginatedGroups = useMemo(() => {
+    const startIndex = (currentPage - 1) * rowsPerPage;
+    return groupedProducts.slice(startIndex, startIndex + rowsPerPage);
+  }, [groupedProducts, currentPage, rowsPerPage]);
+
+  const totalPages = Math.ceil(groupedProducts.length / rowsPerPage) || 1;
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -299,8 +388,18 @@ const ProductList = () => {
     setShowModal(true);
   };
 
-  const handleOpenEditForm = (product) => {
-    setSelectedProduct(product);
+  const handleOpenEditForm = (product, group = null) => {
+    const nameClean = (product.name || '').trim().toLowerCase();
+    const brandClean = (product.brand || '').trim().toLowerCase();
+    const matchingVariants = group?.variants || products.filter(item =>
+      (item.name || '').trim().toLowerCase() === nameClean &&
+      (item.brand || '').trim().toLowerCase() === brandClean
+    );
+
+    setSelectedProduct({
+      ...product,
+      existingVariants: matchingVariants && matchingVariants.length > 0 ? matchingVariants : [product]
+    });
     setShowModal(true);
     setActiveActionsMenu(null);
   };
@@ -392,43 +491,111 @@ const ProductList = () => {
 
   const handleFormSubmission = async (formData) => {
     try {
-      const data = new FormData();
-      data.append('name', formData.name);
-      data.append('barcode', formData.barcode || '');
-      data.append('brand', formData.brand || '');
-      if (formData.brand_id) data.append('brand_id', formData.brand_id);
-      
-      const matchedCat = categoriesList.find(c => String(c.id) === String(formData.category_id) || c.name === formData.category);
-      const categoryId = formData.category_id || (matchedCat ? matchedCat.id : '');
-      if (categoryId) data.append('category_id', categoryId);
-      data.append('category', formData.category || (matchedCat ? matchedCat.name : ''));
-      
-      data.append('unit', formData.unit);
-      data.append('sub_category', formData.sub_category || '');
-      if (formData.sub_category_id) data.append('sub_category_id', formData.sub_category_id);
-      data.append('measurement_value', formData.measurement_value || '');
-      
-      data.append('purchase_price', formData.purchasePrice || 0);
-      data.append('selling_price', formData.sellingPrice || 0);
-      data.append('mrp', formData.mrp || formData.sellingPrice || 0);
-      data.append('gst', formData.gst || 0);
-      data.append('min_stock', formData.minimumStock || 5);
-      data.append('max_stock', formData.maximumStock || 100);
-      data.append('expiry_date', formData.expiryDate || '');
-      data.append('description', formData.description || '');
-      data.append('opening_stock', formData.openingStock || 0);
-      data.append('warehouse_id', 1);
+      const weightsToProcess = (formData.weights && formData.weights.length > 0)
+        ? formData.weights
+        : [formData.measurement_value || ''];
 
-      if (formData.imageFile) {
-        data.append('image', formData.imageFile);
+      if (weightsToProcess.length === 0 || (weightsToProcess.length === 1 && !weightsToProcess[0])) {
+        toast.error('Please select at least one weight variant for this product.');
+        return;
       }
 
+      const buildVariantFormData = (weightVal, barcodeVal) => {
+        const data = new FormData();
+        data.append('name', formData.name);
+        data.append('barcode', barcodeVal || '');
+        data.append('brand', formData.brand || '');
+        if (formData.brand_id) data.append('brand_id', formData.brand_id);
+        
+        const matchedCat = categoriesList.find(c => String(c.id) === String(formData.category_id) || c.name === formData.category);
+        const categoryId = formData.category_id || (matchedCat ? matchedCat.id : '');
+        if (categoryId) data.append('category_id', categoryId);
+        data.append('category', formData.category || (matchedCat ? matchedCat.name : ''));
+        
+        data.append('unit', formData.unit);
+        data.append('sub_category', formData.sub_category || '');
+        if (formData.sub_category_id) data.append('sub_category_id', formData.sub_category_id);
+        data.append('measurement_value', weightVal || '');
+        
+        data.append('purchase_price', formData.purchasePrice || 0);
+        data.append('selling_price', formData.sellingPrice || 0);
+        data.append('mrp', formData.mrp || formData.sellingPrice || 0);
+        data.append('gst', formData.gst || 0);
+        data.append('min_stock', formData.minimumStock || 5);
+        data.append('max_stock', formData.maximumStock || 100);
+        data.append('expiry_date', formData.expiryDate || '');
+        data.append('description', formData.description || '');
+        data.append('opening_stock', formData.openingStock || 0);
+        data.append('warehouse_id', 1);
+
+        if (formData.imageFile) {
+          data.append('image', formData.imageFile);
+        }
+        return data;
+      };
+
       if (selectedProduct) {
-        await productsAPI.update(selectedProduct.id, data);
-        toast.success('Product details updated successfully');
+        const existingVariants = selectedProduct.existingVariants || [selectedProduct];
+
+        // 1. Delete unchecked variants (present in existingVariants, but unchecked in weightsToProcess)
+        const uncheckedVariants = existingVariants.filter(
+          v => v.measurement_value && !weightsToProcess.includes(v.measurement_value)
+        );
+        for (const uv of uncheckedVariants) {
+          try {
+            await productsAPI.delete(uv.id);
+          } catch (delErr) {
+            console.error(`Failed to delete unchecked variant ID ${uv.id}:`, delErr);
+          }
+        }
+
+        // 2. Update kept variants
+        const keptVariants = existingVariants.filter(
+          v => v.measurement_value && weightsToProcess.includes(v.measurement_value)
+        );
+        for (const kv of keptVariants) {
+          const updateData = buildVariantFormData(kv.measurement_value, kv.barcode);
+          await productsAPI.update(kv.id, updateData);
+        }
+
+        // 3. Create newly checked variants
+        const existingWeightValues = existingVariants.map(v => v.measurement_value).filter(Boolean);
+        const newlyAddedWeights = weightsToProcess.filter(w => !existingWeightValues.includes(w));
+        for (const nw of newlyAddedWeights) {
+          const createData = buildVariantFormData(nw, '');
+          await productsAPI.create(createData);
+        }
+
+        // Fallback if existingVariants had no measurement values
+        if (keptVariants.length === 0 && uncheckedVariants.length === 0) {
+          const fallbackData = buildVariantFormData(weightsToProcess[0], selectedProduct.barcode);
+          await productsAPI.update(selectedProduct.id, fallbackData);
+          if (weightsToProcess.length > 1) {
+            for (let i = 1; i < weightsToProcess.length; i++) {
+              const extraData = buildVariantFormData(weightsToProcess[i], '');
+              await productsAPI.create(extraData);
+            }
+          }
+        }
+
+        const actionsTaken = [];
+        if (keptVariants.length > 0) actionsTaken.push(`${keptVariants.length} updated`);
+        if (newlyAddedWeights.length > 0) actionsTaken.push(`${newlyAddedWeights.length} added`);
+        if (uncheckedVariants.length > 0) actionsTaken.push(`${uncheckedVariants.length} removed`);
+        toast.success(`Product saved successfully (${actionsTaken.join(', ') || 'updated'})`);
+
       } else {
-        await productsAPI.create(data);
-        toast.success('New product added successfully');
+        // Add new product
+        for (let i = 0; i < weightsToProcess.length; i++) {
+          const barcodeVal = i === 0 ? (formData.barcode || '') : '';
+          const data = buildVariantFormData(weightsToProcess[i], barcodeVal);
+          await productsAPI.create(data);
+        }
+        if (weightsToProcess.length > 1) {
+          toast.success(`${weightsToProcess.length} product variants created successfully`);
+        } else {
+          toast.success('New product added successfully');
+        }
       }
       fetchProductsAndCategories();
     } catch (error) {
@@ -622,8 +789,8 @@ const ProductList = () => {
   };
 
   const handleSelectAllToggle = () => {
-    const paginatedIds = paginatedProducts.map(p => p.id);
-    const allSelected = paginatedIds.every(id => selectedRowIds.includes(id));
+    const paginatedIds = paginatedGroups.map(g => getActiveVariant(g).id);
+    const allSelected = paginatedIds.length > 0 && paginatedIds.every(id => selectedRowIds.includes(id));
     if (allSelected) {
       setSelectedRowIds(selectedRowIds.filter(id => !paginatedIds.includes(id)));
     } else {
@@ -636,9 +803,10 @@ const ProductList = () => {
   };
 
   const isAllPaginatedSelected = useMemo(() => {
-    if (paginatedProducts.length === 0) return false;
-    return paginatedProducts.map(p => p.id).every(id => selectedRowIds.includes(id));
-  }, [paginatedProducts, selectedRowIds]);
+    if (paginatedGroups.length === 0) return false;
+    const paginatedIds = paginatedGroups.map(g => getActiveVariant(g).id);
+    return paginatedIds.every(id => selectedRowIds.includes(id));
+  }, [paginatedGroups, selectedVariantIds, selectedRowIds, searchQuery]);
 
   const fetchStatusChipStyles = (status) => {
     switch (status) {
@@ -893,10 +1061,10 @@ const ProductList = () => {
                   </th>
                   <th className="py-3.5 px-4 text-center w-12 bg-slate-50 dark:bg-slate-800">Image</th>
                   <th className="py-3.5 px-4 min-w-[200px] bg-slate-50 dark:bg-slate-800">Product Name</th>
+                  <th className="py-3.5 px-4 min-w-[130px] bg-slate-50 dark:bg-slate-800">Weight</th>
                   <th className="py-3.5 px-4 bg-slate-50 dark:bg-slate-800">Barcode</th>
                   <th className="py-3.5 px-4 bg-slate-50 dark:bg-slate-800">Category</th>
                   <th className="py-3.5 px-4 bg-slate-50 dark:bg-slate-800">Sub Category</th>
-                  <th className="py-3.5 px-4 bg-slate-50 dark:bg-slate-800">Brand</th>
                   <th className="py-3.5 px-4 text-right bg-slate-50 dark:bg-slate-800">Purchase Price</th>
                   <th className="py-3.5 px-4 text-right bg-slate-50 dark:bg-slate-800">Selling Price</th>
                   <th className="py-3.5 px-4 text-right bg-slate-50 dark:bg-slate-800">MRP</th>
@@ -910,143 +1078,187 @@ const ProductList = () => {
 
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300">
                 <AnimatePresence mode="popLayout">
-                  {processedProducts.length > 0 ? (
-                    paginatedProducts.map((p) => (
-                      <motion.tr
-                        key={p.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors duration-150 group"
-                      >
-                        <td className="py-3 px-4 text-center">
-                          <input 
-                            type="checkbox"
-                            checked={selectedRowIds.includes(p.id)}
-                            onChange={() => handleRowSelectToggle(p.id)}
-                            className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 cursor-pointer h-4 w-4"
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {p.image_url ? (
-                            <div className="relative w-16 h-16 mx-auto">
-                              <img 
-                                src={getImageUrl(p.image_url)} 
-                                alt={p.name}
-                                className="w-16 h-16 object-cover rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm"
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  if (e.target.nextSibling) {
-                                    e.target.nextSibling.style.display = 'flex';
-                                  }
-                                }}
-                              />
-                              <div 
-                                style={{ display: 'none' }}
-                                className="w-16 h-16 items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xl font-normal text-slate-500"
-                              >
-                                📦
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="w-16 h-16 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 mx-auto text-xl font-normal text-slate-500">
-                              📦
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 font-bold text-slate-800 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                          <div>{p.name}</div>
-                          <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-400">
-                            {p.measurement_value ? `${p.unit} (${p.measurement_value})` : p.unit}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400 text-[11px] tracking-tight">{p.barcode || 'N/A'}</td>
-                        <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-semibold">{p.category}</td>
-                        <td className="py-3 px-4 text-slate-500 dark:text-slate-400 font-medium">{p.sub_category || 'N/A'}</td>
-                        <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{p.brand || 'N/A'}</td>
-                        <td className="py-3 px-4 text-right tabular-nums text-slate-700 dark:text-slate-300">₹{p.purchasePrice}</td>
-                        <td className="py-3 px-4 text-right tabular-nums text-blue-600 dark:text-blue-400 font-bold">₹{p.sellingPrice}</td>
-                        <td className="py-3 px-4 text-right tabular-nums text-slate-400 dark:text-slate-500 line-through">₹{p.mrp}</td>
-                        <td className="py-3 px-4 text-center text-slate-600 dark:text-slate-400 tabular-nums">{p.gst}%</td>
-                        <td className={`py-3 px-4 text-center font-bold tabular-nums ${ (p.currentStock ?? 0) <= p.minimumStock ? 'text-rose-600 dark:text-rose-400' : 'text-slate-800 dark:text-slate-100'}`}>
-                          {p.currentStock ?? 0}
-                        </td>
-                        <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                          {formatExpiryDate(p.expiryDate)}
-                        </td>
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
-                          <div className="flex flex-wrap items-center justify-center gap-1">
-                            {p.isOut || (p.currentStock ?? 0) <= 0 ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-250 dark:border-rose-800">
-                                Out Of Stock
-                              </span>
-                            ) : (
-                              <>
-                                <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-250 dark:border-emerald-800">
-                                  In Stock
-                                </span>
-                                {p.isLow && (
-                                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-250 dark:border-amber-800 animate-pulse">
-                                    Low Stock
-                                  </span>
-                                )}
-                                {p.isNear && (
-                                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-255 dark:border-orange-800">
-                                    Near Expiry
-                                  </span>
-                                )}
-                                {p.isExp && (
-                                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-255 dark:border-purple-800">
-                                    Expired
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                        
-                        {/* ROW ACTIONS MENU */}
-                        <td className="py-3 px-4 text-center sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50/90 dark:group-hover:bg-slate-800/90 shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.1)] transition-colors z-10">
-                          <div className="relative inline-block text-left">
-                            <button
-                              onClick={() => setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id)}
-                              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 cursor-pointer"
-                            >
-                              <EllipsisVerticalIcon className="w-4 h-4" />
-                            </button>
-                            
-                            {activeActionsMenu === p.id && (
-                              <>
-                                <div className="fixed inset-0 z-40" onClick={() => setActiveActionsMenu(null)} />
-                                <div className="absolute right-0 mt-1 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200/85 dark:border-slate-700 z-50 py-1.5 text-left transform origin-top-right transition-all">
-                                  {!isReadOnly && (
-                                    <>
-                                      <button onClick={() => handleOpenEditForm(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
-                                        <PencilIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Edit details
-                                      </button>
-                                      <button onClick={() => handleDuplicateProduct(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
-                                        <DocumentDuplicateIcon className="w-3.5 h-3.5 text-emerald-500" /> Duplicate
-                                      </button>
-                                    </>
-                                  )}
-                                  <button onClick={() => handlePrintBarcode(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
-                                    <PrinterIcon className="w-3.5 h-3.5 text-purple-500" /> Print label
-                                  </button>
-                                  {!isReadOnly && (
-                                    <>
-                                      <div className="h-px bg-slate-100 dark:bg-slate-700 my-1" />
-                                      <button onClick={() => handleOpenDeleteConfirm(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[11px] font-bold cursor-pointer">
-                                        <TrashIcon className="w-3.5 h-3.5" /> Delete product
-                                      </button>
-                                    </>
-                                  )}
+                  {groupedProducts.length > 0 ? (
+                    paginatedGroups.map((group) => {
+                      const p = getActiveVariant(group);
+                      return (
+                        <motion.tr
+                          key={group.groupKey}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors duration-150 group"
+                        >
+                          <td className="py-3 px-4 text-center">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedRowIds.includes(p.id)}
+                              onChange={() => handleRowSelectToggle(p.id)}
+                              className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 cursor-pointer h-4 w-4"
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {(() => {
+                              const img = p.image_url || group.variants.find(v => v.image_url)?.image_url;
+                              return img ? (
+                                <div className="relative w-16 h-16 mx-auto">
+                                  <img 
+                                    src={getImageUrl(img)} 
+                                    alt={p.name}
+                                    className="w-16 h-16 object-cover rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      if (e.target.nextSibling) {
+                                        e.target.nextSibling.style.display = 'flex';
+                                      }
+                                    }}
+                                  />
+                                  <div 
+                                    style={{ display: 'none' }}
+                                    className="w-16 h-16 items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xl font-normal text-slate-500"
+                                  >
+                                    📦
+                                  </div>
                                 </div>
-                              </>
+                              ) : (
+                                <div className="w-16 h-16 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 mx-auto text-xl font-normal text-slate-500">
+                                  📦
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                            <div>{group.displayName || group.name}</div>
+                            {group.variants.length > 1 ? (
+                              <div className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 flex items-center gap-1 mt-0.5">
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                                {group.variants.length} weight variants
+                              </div>
+                            ) : (
+                              <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                                {p.unit || 'Standard'}
+                              </div>
                             )}
-                          </div>
-                        </td>
-                      </motion.tr>
-                    ))
+                          </td>
+
+                          {/* WEIGHT COLUMN */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            {group.variants.length > 1 ? (
+                              <div className="relative inline-block">
+                                <select
+                                  value={p.id}
+                                  onChange={(e) => {
+                                    const vId = Number(e.target.value);
+                                    setSelectedVariantIds(prev => ({ ...prev, [group.groupKey]: vId }));
+                                  }}
+                                  className="pl-2.5 pr-7 py-1 text-xs font-bold border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-sm appearance-none"
+                                >
+                                  {group.variants.map((v) => (
+                                    <option key={v.id} value={v.id} className="dark:bg-slate-800 dark:text-slate-200">
+                                      {v.measurement_value || v.unit || 'Standard'}
+                                    </option>
+                                  ))}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-indigo-500">
+                                  <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20">
+                                    <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd"></path>
+                                  </svg>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="inline-block px-2.5 py-1 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                                {p.measurement_value || p.unit || 'Standard'}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400 text-[11px] tracking-tight">{p.barcode || 'N/A'}</td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-semibold">{p.category}</td>
+                          <td className="py-3 px-4 text-slate-500 dark:text-slate-400 font-medium">{p.sub_category || 'N/A'}</td>
+                          <td className="py-3 px-4 text-right tabular-nums text-slate-700 dark:text-slate-300">₹{p.purchasePrice}</td>
+                          <td className="py-3 px-4 text-right tabular-nums text-blue-600 dark:text-blue-400 font-bold">₹{p.sellingPrice}</td>
+                          <td className="py-3 px-4 text-right tabular-nums text-slate-400 dark:text-slate-500 line-through">₹{p.mrp}</td>
+                          <td className="py-3 px-4 text-center text-slate-600 dark:text-slate-400 tabular-nums">{p.gst}%</td>
+                          <td className={`py-3 px-4 text-center font-bold tabular-nums ${ (p.currentStock ?? 0) <= p.minimumStock ? 'text-rose-600 dark:text-rose-400' : 'text-slate-800 dark:text-slate-100'}`}>
+                            {p.currentStock ?? 0}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {formatExpiryDate(p.expiryDate)}
+                          </td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                            <div className="flex flex-wrap items-center justify-center gap-1">
+                              {p.isOut || (p.currentStock ?? 0) <= 0 ? (
+                                <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-250 dark:border-rose-800">
+                                  Out Of Stock
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-250 dark:border-emerald-800">
+                                    In Stock
+                                  </span>
+                                  {p.isLow && (
+                                    <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-250 dark:border-amber-800 animate-pulse">
+                                      Low Stock
+                                    </span>
+                                  )}
+                                  {p.isNear && (
+                                    <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-255 dark:border-orange-800">
+                                      Near Expiry
+                                    </span>
+                                  )}
+                                  {p.isExp && (
+                                    <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-tight bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-255 dark:border-purple-800">
+                                      Expired
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          
+                          {/* ROW ACTIONS MENU */}
+                          <td className="py-3 px-4 text-center sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50/90 dark:group-hover:bg-slate-800/90 shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.1)] transition-colors z-10">
+                            <div className="relative inline-block text-left">
+                              <button
+                                onClick={() => setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 cursor-pointer"
+                              >
+                                <EllipsisVerticalIcon className="w-4 h-4" />
+                              </button>
+                              
+                              {activeActionsMenu === p.id && (
+                                <>
+                                  <div className="fixed inset-0 z-40" onClick={() => setActiveActionsMenu(null)} />
+                                  <div className="absolute right-0 mt-1 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200/85 dark:border-slate-700 z-50 py-1.5 text-left transform origin-top-right transition-all">
+                                    {!isReadOnly && (
+                                      <>
+                                        <button onClick={() => handleOpenEditForm(p, group)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
+                                          <PencilIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Edit details
+                                        </button>
+                                        <button onClick={() => handleDuplicateProduct(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
+                                          <DocumentDuplicateIcon className="w-3.5 h-3.5 text-emerald-500" /> Duplicate
+                                        </button>
+                                      </>
+                                    )}
+                                    <button onClick={() => handlePrintBarcode(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
+                                      <PrinterIcon className="w-3.5 h-3.5 text-purple-500" /> Print label
+                                    </button>
+                                    {!isReadOnly && (
+                                      <>
+                                        <div className="h-px bg-slate-100 dark:bg-slate-700 my-1" />
+                                        <button onClick={() => handleOpenDeleteConfirm(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[11px] font-bold cursor-pointer">
+                                          <TrashIcon className="w-3.5 h-3.5" /> Delete product
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan={18} className="py-16 px-4 text-center">
@@ -1089,9 +1301,9 @@ const ProductList = () => {
               </select>
             </div>
             <span>
-              Showing <span className="text-slate-900 dark:text-white font-bold">{processedProducts.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}</span> to{' '}
-              <span className="text-slate-900 dark:text-white font-bold">{Math.min(currentPage * rowsPerPage, processedProducts.length)}</span> of{' '}
-              <span className="text-slate-900 dark:text-white font-bold">{processedProducts.length}</span> entries
+              Showing <span className="text-slate-900 dark:text-white font-bold">{groupedProducts.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}</span> to{' '}
+              <span className="text-slate-900 dark:text-white font-bold">{Math.min(currentPage * rowsPerPage, groupedProducts.length)}</span> of{' '}
+              <span className="text-slate-900 dark:text-white font-bold">{groupedProducts.length}</span> products {processedProducts.length !== groupedProducts.length ? `(${processedProducts.length} variants)` : ''}
             </span>
           </div>
 

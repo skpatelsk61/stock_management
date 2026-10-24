@@ -127,20 +127,35 @@ const VendorList = ({ defaultView = 'list' }) => {
 
   useEffect(() => {
     fetchVendors();
-    const handleEventUpdate = () => {
-      fetchVendors();
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchVendors();
+      }, 350);
     };
-    window.addEventListener('focus', handleEventUpdate);
-    window.addEventListener('vendor-updated', handleEventUpdate);
-    window.addEventListener('purchase-updated', handleEventUpdate);
-    window.addEventListener('stock-changed', handleEventUpdate);
-    window.addEventListener('inventory-updated', handleEventUpdate);
+
+    const handleFocusSync = () => {
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        fetchVendors();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    window.addEventListener('vendor-updated', handleDebouncedUpdate);
+    window.addEventListener('purchase-updated', handleDebouncedUpdate);
+    window.addEventListener('stock-changed', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
     return () => {
-      window.removeEventListener('focus', handleEventUpdate);
-      window.removeEventListener('vendor-updated', handleEventUpdate);
-      window.removeEventListener('purchase-updated', handleEventUpdate);
-      window.removeEventListener('stock-changed', handleEventUpdate);
-      window.removeEventListener('inventory-updated', handleEventUpdate);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocusSync);
+      window.removeEventListener('vendor-updated', handleDebouncedUpdate);
+      window.removeEventListener('purchase-updated', handleDebouncedUpdate);
+      window.removeEventListener('stock-changed', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
     };
   }, []);
 
@@ -1621,234 +1636,261 @@ const VendorList = ({ defaultView = 'list' }) => {
       {showPaymentModal && paymentVendor && (
         <Modal
           isOpen={true}
-          size="3xl"
-          title={`Supplier Treasury & Payment Ledger — ${paymentVendor.name}`}
+          size="2xl"
+          title={
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center text-sm font-bold shadow-2xs">
+                💳
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                    Record Supplier Payment
+                  </h3>
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded-md font-mono font-bold border border-slate-200 dark:border-slate-700">
+                    {paymentVendor.supplier_code || `SUP-${paymentVendor.id}`}
+                  </span>
+                </div>
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Supplier: <span className="text-slate-800 dark:text-slate-200 font-bold">{paymentVendor.name}</span>
+                </p>
+              </div>
+            </div>
+          }
           onClose={() => setShowPaymentModal(false)}
           noPadding={true}
         >
           <form onSubmit={handleSavePayment} className="flex flex-col min-h-0 text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-950/40 select-none">
             
-            <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto max-h-[75vh]">
 
-              {/* 1. VENDOR FINANCIAL HEALTH HEADER CARD */}
-              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-lg border border-indigo-800/40 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-800/40 pb-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center text-indigo-200 font-black text-lg shadow-inner">
-                      {paymentVendor.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-black tracking-tight text-white">{paymentVendor.name}</h3>
-                        <span className="text-[10px] bg-indigo-500/25 text-indigo-200 px-2 py-0.5 rounded-md font-mono font-bold border border-indigo-400/20">
-                          {paymentVendor.supplier_code || `SUP-${paymentVendor.id}`}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-300 font-medium mt-0.5">
-                        📞 {paymentVendor.phone || 'No Contact'} {paymentVendor.gstin ? `| GSTIN: ${paymentVendor.gstin}` : ''}
-                      </p>
-                    </div>
+              {/* 1. COMPACT SUPPLIER SUMMARY & BALANCE STRIP */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-black text-base flex items-center justify-center border border-indigo-500/20">
+                    {paymentVendor.name.charAt(0).toUpperCase()}
                   </div>
-
-                  {/* Financial Status Pill */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {Number(paymentVendor.advance_balance || 0) > 0 ? (
-                      <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 px-3 py-1.5 rounded-xl text-right">
-                        <span className="text-[9px] font-black uppercase tracking-wider block text-emerald-400/80">Advance Credit Available</span>
-                        <span className="text-sm font-black font-mono">₹{Number(paymentVendor.advance_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    ) : Number(paymentVendor.outstanding_balance || 0) > 0 ? (
-                      <div className="bg-rose-500/20 border border-rose-500/40 text-rose-300 px-3 py-1.5 rounded-xl text-right">
-                        <span className="text-[9px] font-black uppercase tracking-wider block text-rose-400/80">Net Payable Amount</span>
-                        <span className="text-sm font-black font-mono">₹{Number(paymentVendor.outstanding_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    ) : (
-                      <div className="bg-slate-700/50 border border-slate-600/50 text-slate-300 px-3 py-1.5 rounded-xl text-right">
-                        <span className="text-[9px] font-black uppercase tracking-wider block text-slate-400">Account Balance</span>
-                        <span className="text-sm font-black font-mono text-emerald-400">Settled (₹0.00)</span>
-                      </div>
-                    )}
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white leading-tight">{paymentVendor.name}</h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 flex items-center gap-2">
+                      <span>📞 {paymentVendor.phone || 'No Contact'}</span>
+                      {paymentVendor.gstin && (
+                        <>
+                          <span className="text-slate-300 dark:text-slate-700">•</span>
+                          <span>GSTIN: {paymentVendor.gstin}</span>
+                        </>
+                      )}
+                    </p>
                   </div>
                 </div>
 
-                {/* Quick Account Summary Numbers */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-800/70 rounded-xl p-2.5 border border-slate-700/60">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total Billed Purchases</span>
-                    <span className="text-xs font-black font-mono text-slate-200 mt-0.5 block">₹{Number(paymentVendor.total_purchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="bg-slate-800/70 rounded-xl p-2.5 border border-slate-700/60">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total Paid to Date</span>
-                    <span className="text-xs font-black font-mono text-emerald-400 mt-0.5 block">₹{Number(paymentVendor.total_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="bg-slate-800/70 rounded-xl p-2.5 border border-slate-700/60">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Pending Due Bills</span>
-                    <span className="text-xs font-black font-mono text-amber-300 mt-0.5 block">
-                      {paymentInvoices.filter(i => i.payment_status !== 'Paid').length} Open Invoice(s)
+                {/* Balance Status */}
+                <div className="text-left sm:text-right shrink-0">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Current Balance</span>
+                  {Number(paymentVendor.advance_balance || 0) > 0 ? (
+                    <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
+                      ₹{Number(paymentVendor.advance_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })} <span className="text-[10px] font-sans font-bold text-emerald-500">(Advance)</span>
                     </span>
+                  ) : Number(paymentVendor.outstanding_balance || 0) > 0 ? (
+                    <span className="text-sm font-black font-mono text-rose-600 dark:text-rose-400">
+                      ₹{Number(paymentVendor.outstanding_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })} <span className="text-[10px] font-sans font-bold text-rose-500">(Pending Due)</span>
+                    </span>
+                  ) : (
+                    <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
+                      ₹0.00 <span className="text-[10px] font-sans font-bold text-emerald-500">(All Cleared)</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. MODERN PAYMENT TYPE TABS */}
+              <div className="grid grid-cols-3 p-1 bg-slate-200/60 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'PAYMENT' }))}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    paymentForm.entry_type === 'PAYMENT' || paymentForm.entry_type === 'SUBTRACT'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <BanknotesIcon className="w-4 h-4 stroke-[2.2]" />
+                  <span>Pay Supplier</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'REFUND' }))}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    paymentForm.entry_type === 'REFUND'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <ArrowRightOnRectangleIcon className="w-4 h-4 stroke-[2.2]" />
+                  <span>Refund Received</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'ADD_DEBT' }))}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    paymentForm.entry_type === 'ADD_DEBT'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <ExclamationCircleIcon className="w-4 h-4 stroke-[2.2]" />
+                  <span>Add Charge</span>
+                </button>
+              </div>
+
+              {/* 3. UNIFIED PAYMENT DETAILS CARD */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
+                
+                {/* Row 1: Amount & Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Payment Amount (₹) <span className="text-rose-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleFillFullBalance}
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all cursor-pointer flex items-center gap-1"
+                      >
+                        <span>⚡</span>
+                        <span>Full Due (₹{Math.abs(Number(paymentVendor?.outstanding_balance || 0) - Number(paymentVendor?.advance_balance || 0)).toLocaleString('en-IN')})</span>
+                      </button>
+                    </div>
+
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3.5 font-black text-lg text-slate-400 select-none">₹</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={paymentForm.amount}
+                        onChange={(e) => setPaymentForm(prev => ({ ...prev, amount: e.target.value }))}
+                        placeholder="0.00"
+                        className="w-full pl-8 pr-3.5 py-2.5 text-base border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-black text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600 font-mono shadow-2xs"
+                      />
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* 2. TRANSACTION ACTION SELECTOR (ACTION TYPES) */}
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  1. Select Transaction Action / Entry Type
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Option A: Payment / Advance */}
-                  <button
-                    type="button"
-                    onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'PAYMENT' }))}
-                    className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
-                      (paymentForm.entry_type === 'PAYMENT' || paymentForm.entry_type === 'SUBTRACT')
-                        ? 'bg-emerald-50/90 dark:bg-emerald-950/50 border-emerald-500 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20 shadow-sm'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <div className={`p-2 rounded-xl text-xs ${
-                        (paymentForm.entry_type === 'PAYMENT' || paymentForm.entry_type === 'SUBTRACT')
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}>
-                        <BanknotesIcon className="w-4 h-4 stroke-[2.5]" />
-                      </div>
-                      {(paymentForm.entry_type === 'PAYMENT' || paymentForm.entry_type === 'SUBTRACT') && (
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900 dark:text-white">Payment Out / Advance</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">Pay due bill or deposit advance credit</p>
-                    </div>
-                  </button>
-
-                  {/* Option B: Cash Refund Received */}
-                  <button
-                    type="button"
-                    onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'REFUND' }))}
-                    className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
-                      paymentForm.entry_type === 'REFUND'
-                        ? 'bg-blue-50/90 dark:bg-blue-950/50 border-blue-500 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20 shadow-sm'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <div className={`p-2 rounded-xl text-xs ${
-                        paymentForm.entry_type === 'REFUND'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}>
-                        <ArrowRightOnRectangleIcon className="w-4 h-4 stroke-[2.5]" />
-                      </div>
-                      {paymentForm.entry_type === 'REFUND' && (
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900 dark:text-white">Refund Received In</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">Supplier returned cash / bank refund</p>
-                    </div>
-                  </button>
-
-                  {/* Option C: Add Debt Charge */}
-                  <button
-                    type="button"
-                    onClick={() => setPaymentForm(prev => ({ ...prev, entry_type: 'ADD_DEBT' }))}
-                    className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
-                      paymentForm.entry_type === 'ADD_DEBT'
-                        ? 'bg-amber-50/90 dark:bg-amber-950/50 border-amber-500 text-amber-900 dark:text-amber-200 ring-2 ring-amber-500/20 shadow-sm'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <div className={`p-2 rounded-xl text-xs ${
-                        paymentForm.entry_type === 'ADD_DEBT'
-                          ? 'bg-amber-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}>
-                        <ExclamationCircleIcon className="w-4 h-4 stroke-[2.5]" />
-                      </div>
-                      {paymentForm.entry_type === 'ADD_DEBT' && (
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900 dark:text-white">Add Debt / Charge</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">Debit adjustment, freight or fee</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. TARGET PURCHASE INVOICE ALLOCATION */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 shadow-xs">
-                <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  2. Purchase Bill Allocation (Optional)
-                </label>
-                <div className="relative">
-                  <select
-                    value={paymentForm.purchase_id}
-                    onChange={(e) => {
-                      const pid = e.target.value;
-                      setPaymentForm(prev => ({ ...prev, purchase_id: pid }));
-                      if (pid && paymentInvoices.length > 0) {
-                        const inv = paymentInvoices.find(i => String(i.id) === String(pid));
-                        if (inv) {
-                          setPaymentForm(prev => ({ ...prev, amount: String(inv.due_amount || 0) }));
-                        }
-                      }
-                    }}
-                    className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
-                  >
-                    <option value="">⚡ Bulk Account Settlement (FIFO Automatic Allocation)</option>
-                    {paymentInvoices.filter(i => i.payment_status !== 'Paid').map(inv => (
-                      <option key={inv.id} value={inv.id}>
-                        Invoice #{inv.purchase_no} — Grand Total: ₹{Number(inv.total).toLocaleString('en-IN')} (Pending Due: ₹{Number(inv.due_amount || inv.total).toLocaleString('en-IN')})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* 4. AMOUNT INPUT & LIVE OBLIGATION PREVIEW */}
-              <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      3. Transaction Amount (₹) <span className="text-rose-500">*</span>
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Payment Date <span className="text-rose-500">*</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleFillFullBalance}
-                      className="text-[10px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-all cursor-pointer"
-                    >
-                      ⚡ Auto-Fill Outstanding (₹{Math.abs(Number(paymentVendor?.outstanding_balance || 0) - Number(paymentVendor?.advance_balance || 0)).toLocaleString('en-IN')})
-                    </button>
-                  </div>
-
-                  <div className="relative flex items-center">
-                    <span className="absolute left-4 font-black text-lg text-slate-400 dark:text-slate-500 select-none">₹</span>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="date"
                       required
-                      value={paymentForm.amount}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, amount: e.target.value }))}
-                      placeholder={
-                        paymentForm.entry_type === 'REFUND'
-                          ? 'Enter refund amount received'
-                          : paymentForm.entry_type === 'ADD_DEBT'
-                          ? 'Enter debt charge amount'
-                          : 'Enter payment amount paid'
-                      }
-                      className="w-full pl-9 pr-4 py-3 text-lg border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-black text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600 font-mono"
+                      value={paymentForm.payment_date}
+                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_date: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
                     />
                   </div>
                 </div>
 
-                {/* LIVE EXPECTED STATUS PREVIEW */}
+                {/* Row 2: Payment Method & Link to Bill */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Payment Method <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={paymentForm.payment_mode}
+                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_mode: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 cursor-pointer shadow-2xs"
+                    >
+                      <option value="Cash">💵 Cash</option>
+                      <option value="UPI">📱 UPI / QR Code</option>
+                      <option value="Bank Transfer">🏦 Bank Transfer</option>
+                      <option value="Cheque">📜 Cheque</option>
+                      <option value="NEFT/RTGS">⚡ NEFT / RTGS</option>
+                      <option value="Journal Adjustment">⚖️ Journal Adjustment</option>
+                      <option value="Other">📑 Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Link to Purchase Bill <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                      </label>
+                      {paymentInvoices.filter(i => i.payment_status !== 'Paid').length > 0 && (
+                        <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-1.5 py-0.5 rounded">
+                          {paymentInvoices.filter(i => i.payment_status !== 'Paid').length} open bill(s)
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={paymentForm.purchase_id}
+                      onChange={(e) => {
+                        const pid = e.target.value;
+                        setPaymentForm(prev => ({ ...prev, purchase_id: pid }));
+                        if (pid && paymentInvoices.length > 0) {
+                          const inv = paymentInvoices.find(i => String(i.id) === String(pid));
+                          if (inv) {
+                            setPaymentForm(prev => ({ ...prev, amount: String(inv.due_amount || 0) }));
+                          }
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs cursor-pointer truncate"
+                    >
+                      <option value="">⚡ General Account (Auto-allocate FIFO)</option>
+                      {paymentInvoices.filter(i => i.payment_status !== 'Paid').map(inv => (
+                        <option key={inv.id} value={inv.id}>
+                          Bill #{inv.purchase_no} — ₹{Number(inv.total).toLocaleString('en-IN')} (Due: ₹{Number(inv.due_amount || inv.total).toLocaleString('en-IN')})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 3: Reference No. & Paid From Account */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Reference No. / UTR / Cheque #
+                    </label>
+                    <input
+                      type="text"
+                      value={paymentForm.reference_no}
+                      onChange={(e) => setPaymentForm(prev => ({ ...prev, reference_no: e.target.value }))}
+                      placeholder="e.g. UTR1293840294 or Cheque No."
+                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Paid From Account / Bank (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={paymentForm.bank_account}
+                      onChange={(e) => setPaymentForm(prev => ({ ...prev, bank_account: e.target.value }))}
+                      placeholder="e.g. HDFC Bank, Cash Drawer, etc."
+                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 4: Notes / Remarks */}
+                <div>
+                  <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Notes / Remarks (Optional)
+                  </label>
+                  <textarea
+                    rows="2"
+                    value={paymentForm.remarks}
+                    onChange={(e) => setPaymentForm(prev => ({ ...prev, remarks: e.target.value }))}
+                    placeholder="Add payment notes, bill reference or instructions..."
+                    className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
+                  />
+                </div>
+
+                {/* Row 5: Live Expected Status Strip */}
                 {(() => {
                   const currentObligation = Number(paymentVendor?.outstanding_balance || 0) - Number(paymentVendor?.advance_balance || 0);
                   const amtInput = Number(paymentForm.amount || 0);
@@ -1860,109 +1902,38 @@ const VendorList = ({ defaultView = 'list' }) => {
                   }
 
                   return (
-                    <div className="bg-slate-50 dark:bg-slate-950/80 p-3.5 rounded-xl border border-slate-200/90 dark:border-slate-800 text-xs flex items-center justify-between">
+                    <div className="bg-slate-50 dark:bg-slate-950/80 p-3 rounded-xl border border-slate-200/90 dark:border-slate-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                        Live Expected Balance After Entry:
+                        Updated Balance after this entry:
                       </span>
                       {newObligation > 0 ? (
                         <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-black text-xs font-mono">
                           <span className="w-2 h-2 rounded-full bg-rose-500" />
-                          Net Payable: ₹{newObligation.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          Remaining Due: ₹{newObligation.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </div>
                       ) : newObligation < 0 ? (
                         <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-black text-xs font-mono">
                           <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                          Advance Credit (Jama): ₹{Math.abs(newObligation).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          Advance Balance (Jama): ₹{Math.abs(newObligation).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-black text-xs font-mono">
+                        <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-black text-xs font-mono">
                           <CheckCircleIcon className="w-4 h-4 text-emerald-500" />
-                          Account Fully Settled (₹0.00)
+                          All Dues Fully Settled (₹0.00)
                         </div>
                       )}
                     </div>
                   );
                 })()}
-              </div>
 
-              {/* 5. METADATA & PAYMENT MODE GRID */}
-              <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3.5 shadow-xs">
-                <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-2">
-                  4. Payment Mode &amp; Audit Reference
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Transaction Date *</label>
-                    <input
-                      type="date"
-                      required
-                      value={paymentForm.payment_date}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_date: e.target.value }))}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Payment Mode / Channel *</label>
-                    <select
-                      value={paymentForm.payment_mode}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_mode: e.target.value }))}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600"
-                    >
-                      <option value="Cash">💵 Cash</option>
-                      <option value="Bank Transfer">🏦 Bank Transfer</option>
-                      <option value="UPI">📱 UPI / QR Code</option>
-                      <option value="Cheque">📜 Cheque</option>
-                      <option value="NEFT/RTGS">⚡ NEFT / RTGS</option>
-                      <option value="Journal Adjustment">⚖️ Journal Adjustment</option>
-                      <option value="Other">📑 Other</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Transaction Ref / UTR / Cheque #</label>
-                    <input
-                      type="text"
-                      value={paymentForm.reference_no}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, reference_no: e.target.value }))}
-                      placeholder="e.g. UTR1293840294"
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Bank / Account Details</label>
-                    <input
-                      type="text"
-                      value={paymentForm.bank_account}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, bank_account: e.target.value }))}
-                      placeholder="e.g. HDFC Bank (A/c ...4092)"
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Remarks / Settlement Notes</label>
-                  <textarea
-                    rows="2"
-                    value={paymentForm.remarks}
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, remarks: e.target.value }))}
-                    placeholder="Add transaction notes or ledger settlement instructions..."
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600"
-                  />
-                </div>
               </div>
 
             </div>
 
             {/* FOOTER ACTIONS */}
             <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between gap-3">
-              <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                🔒 Protected &amp; Audited Supplier Ledger Entry
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                🔒 Secure Khata &amp; Payment Record
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -1984,12 +1955,12 @@ const VendorList = ({ defaultView = 'list' }) => {
                   }`}
                 >
                   {paymentSubmitting 
-                    ? 'Recording Transaction...' 
+                    ? 'Recording Payment...' 
                     : paymentForm.entry_type === 'REFUND'
-                    ? 'Confirm Cash Refund Received (📥)' 
+                    ? 'Confirm & Save Refund' 
                     : paymentForm.entry_type === 'ADD_DEBT'
-                    ? 'Confirm & Add Debt Charge (⚡)'
-                    : 'Confirm & Record Payment (📤)'}
+                    ? 'Add Debit Charge to Khata'
+                    : `Confirm & Save Payment${Number(paymentForm.amount || 0) > 0 ? ` (₹${Number(paymentForm.amount).toLocaleString('en-IN')})` : ''}`}
                 </button>
               </div>
             </div>

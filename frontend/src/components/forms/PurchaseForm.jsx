@@ -28,12 +28,15 @@ import PurchaseInvoicePrintTemplate from '../common/PurchaseInvoicePrintTemplate
 const normProduct = (p) => ({
   id: p.id,
   name: p.name,
+  brand: p.brand || p.brand_name || '',
+  measurement_value: p.measurement_value || '',
   barcode: p.barcode || p.bar_code || '',
   category: p.category_name || p.category || 'General',
   category_id: p.category_id || p.categoryId || '',
   purchasePrice: Number(p.purchase_price ?? p.purchasePrice ?? 0),
   unit: p.unit || 'Pcs',
   gst: Number(p.gst ?? 18),
+  total_stock: Number(p.total_stock ?? p.currentStock ?? p.quantity ?? 0),
 });
 
 const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
@@ -180,6 +183,29 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
         return false;
       })
     : dbProducts;
+
+  // Group filtered products by product name (brand) for tree structure
+  const groupedProducts = useMemo(() => {
+    const groups = {};
+    filteredProducts.forEach((p) => {
+      const brandStr = (p.brand || '').trim();
+      const nameStr = (p.name || '').trim();
+      const grpKey = `${nameStr.toLowerCase()}__${brandStr.toLowerCase()}`;
+      const displayName = brandStr ? `${nameStr} (${brandStr})` : nameStr;
+
+      if (!groups[grpKey]) {
+        groups[grpKey] = {
+          key: grpKey,
+          name: nameStr,
+          brand: brandStr,
+          displayName,
+          variants: []
+        };
+      }
+      groups[grpKey].variants.push(p);
+    });
+    return Object.values(groups);
+  }, [filteredProducts]);
 
   const handleCategoryChange = (catVal) => {
     setSelectedCategory(catVal);
@@ -639,7 +665,28 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                         ? '— No Products in Category —'
                         : '— Choose Catalog Product —'}
                     </option>
-                    {filteredProducts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.barcode || '—'})</option>)}
+                    {groupedProducts.map((grp) => {
+                      const hasMultiple = grp.variants.length > 1;
+                      return (
+                        <optgroup 
+                          key={grp.key} 
+                          label={hasMultiple ? `📁 ${grp.displayName} (${grp.variants.length} Weights)` : `📦 ${grp.displayName}`}
+                        >
+                          {grp.variants.map((v, idx) => {
+                            const isLast = idx === grp.variants.length - 1;
+                            const treeSymbol = hasMultiple ? (isLast ? '└── ' : '├── ') : '└── ';
+                            const weightLabel = v.measurement_value || v.unit || 'Standard';
+                            const stockNum = Number(v.total_stock || 0);
+                            const stockTag = stockNum <= 0 ? ' [Out of Stock]' : ` (Stock: ${stockNum})`;
+                            return (
+                              <option key={v.id} value={v.id}>
+                                {`${treeSymbol}${grp.displayName} — Weight: ${weightLabel}${stockTag}`}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      );
+                    })}
                   </select>
                 </div>
 

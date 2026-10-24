@@ -64,8 +64,8 @@ export default defineConfig(({ mode }) => {
   // Load env file from the current directory
   const env = loadEnv(mode, process.cwd(), '');
   
-  // Docker Compose network में service name ('node_api') से DNS resolve होता है
-  const backendUrl = env.VITE_API_URL || 'http://node_api:5000';
+  // Docker Compose network में backend service name 'node_api:5000' है
+  const backendUrl = process.env.BACKEND_URL || 'http://node_api:5000';
 
   return {
     plugins: [react()],
@@ -85,6 +85,20 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true,
           secure: false,
+        }
+      }
+    },
+    build: {
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('recharts')) return 'vendor-charts';
+              if (id.includes('@heroicons')) return 'vendor-icons';
+              if (id.includes('framer-motion') || id.includes('react') || id.includes('redux')) return 'vendor-framework';
+            }
+          }
         }
       }
     }

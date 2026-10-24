@@ -86,6 +86,10 @@ const PurchaseInvoicePrintTemplate = ({ purchase, storeInfo, ref }) => {
   const pendingAmount = Math.max(0, Number((grandTotal - paidAmount).toFixed(2)));
   const roundOff = (grandTotal - Math.floor(grandTotal)).toFixed(2);
 
+  // Multi-Installment Shipments & Payment History
+  const shipments = Array.isArray(purchase.shipments) ? purchase.shipments : [];
+  const payments = Array.isArray(purchase.payments) ? purchase.payments : [];
+
   return (
     <div
       ref={ref}
@@ -243,6 +247,161 @@ const PurchaseInvoicePrintTemplate = ({ purchase, storeInfo, ref }) => {
         </table>
       </div>
 
+      {/* ── 3.1 STOCK INTAKE INSTALLMENTS BREAKDOWN ── */}
+      {shipments.length > 0 && (
+        <div className="my-4 border border-slate-300 rounded-lg overflow-hidden bg-white">
+          <div className="bg-slate-800 text-white px-3.5 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">📦</span>
+              <h3 className="text-xs font-black uppercase tracking-wider">
+                Stock Delivery &amp; Intake Installments (माल प्राप्ति किश्त विवरण)
+              </h3>
+            </div>
+            <span className="text-[10px] font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded">
+              Total {shipments.length} Delivery Installment{shipments.length > 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <table className="w-full text-left border-collapse text-[11px]">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700 uppercase text-[9px] font-black tracking-wider border-b border-slate-300">
+                <th className="py-2 px-2.5 text-center w-12">Installment</th>
+                <th className="py-2 px-3">GRN Number</th>
+                <th className="py-2 px-3">Intake Date</th>
+                <th className="py-2 px-3 text-center">Delivered Qty</th>
+                <th className="py-2 px-3 text-center">Damaged / Short</th>
+                <th className="py-2 px-3 text-center font-bold text-emerald-800">Accepted Inward</th>
+                <th className="py-2 px-3 text-right font-black">Shipment Value (₹)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-800 font-medium">
+              {shipments.map((ship, sIdx) => {
+                const sDate = ship.date ? new Date(ship.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+                const recQty = Number(ship.total_received || 0);
+                const damQty = Number(ship.total_damaged || 0) + Number(ship.total_rejected || 0);
+                const accQty = Number(ship.total_accepted || Math.max(0, recQty - damQty));
+                const shipAmt = Number(ship.amount || 0);
+
+                return (
+                  <tr key={sIdx} className={sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                    <td className="py-2 px-2.5 text-center font-black text-slate-600 text-[10px]">
+                      #{ship.installment_no || sIdx + 1}
+                    </td>
+                    <td className="py-2 px-3 font-mono font-bold text-slate-950">
+                      {ship.grn_no || `GRN-${ship.id}`}
+                    </td>
+                    <td className="py-2 px-3 text-slate-700">{sDate}</td>
+                    <td className="py-2 px-3 text-center font-bold text-slate-900">{recQty}</td>
+                    <td className="py-2 px-3 text-center font-semibold">
+                      {damQty > 0 ? (
+                        <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded font-bold">
+                          {damQty} Damaged
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-center font-bold text-emerald-700">{accQty}</td>
+                    <td className="py-2 px-3 text-right font-mono font-black text-slate-950">
+                      ₹{shipAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-100/80 font-bold border-t-2 border-slate-300 text-slate-900 text-[10px]">
+                <td colSpan="3" className="py-2 px-3 uppercase tracking-wider text-slate-600">
+                  Total Across Deliveries:
+                </td>
+                <td className="py-2 px-3 text-center font-black">
+                  {shipments.reduce((sum, s) => sum + Number(s.total_received || 0), 0)}
+                </td>
+                <td className="py-2 px-3 text-center text-rose-700 font-black">
+                  {shipments.reduce((sum, s) => sum + (Number(s.total_damaged || 0) + Number(s.total_rejected || 0)), 0)}
+                </td>
+                <td className="py-2 px-3 text-center text-emerald-700 font-black">
+                  {shipments.reduce((sum, s) => sum + Number(s.total_accepted || 0), 0)}
+                </td>
+                <td className="py-2 px-3 text-right font-mono font-black text-emerald-800 text-[11px]">
+                  ₹{shipments.reduce((sum, s) => sum + Number(s.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* ── 3.2 PAYMENT INSTALLMENTS & SETTLEMENT HISTORY ── */}
+      {payments.length > 0 && (
+        <div className="my-4 border border-slate-300 rounded-lg overflow-hidden bg-white">
+          <div className="bg-emerald-900 text-white px-3.5 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">💳</span>
+              <h3 className="text-xs font-black uppercase tracking-wider">
+                Payment Installments &amp; Settlement History (भुगतान किश्त विवरण)
+              </h3>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-200 bg-emerald-950 px-2 py-0.5 rounded">
+              Total {payments.length} Payment Installment{payments.length > 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <table className="w-full text-left border-collapse text-[11px]">
+            <thead>
+              <tr className="bg-emerald-50/60 text-slate-700 uppercase text-[9px] font-black tracking-wider border-b border-emerald-200">
+                <th className="py-2 px-2.5 text-center w-12">Payment</th>
+                <th className="py-2 px-3">Voucher / Receipt No.</th>
+                <th className="py-2 px-3">Payment Date</th>
+                <th className="py-2 px-3 text-center">Payment Mode</th>
+                <th className="py-2 px-3">Reference / Remarks</th>
+                <th className="py-2 px-3 text-right font-black">Amount Paid (₹)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-800 font-medium">
+              {payments.map((pay, pIdx) => {
+                const pDate = pay.payment_date ? new Date(pay.payment_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+                const pAmt = Number(pay.amount || 0);
+
+                return (
+                  <tr key={pIdx} className={pIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                    <td className="py-2 px-2.5 text-center font-black text-slate-600 text-[10px]">
+                      #{pay.installment_no || pIdx + 1}
+                    </td>
+                    <td className="py-2 px-3 font-mono font-bold text-slate-950">
+                      {pay.payment_no || `VPAY-${pay.id}`}
+                    </td>
+                    <td className="py-2 px-3 text-slate-700">{pDate}</td>
+                    <td className="py-2 px-3 text-center">
+                      <span className="px-2 py-0.5 rounded bg-slate-100 font-bold text-[10px] text-slate-700 border border-slate-200">
+                        {pay.payment_mode || 'Cash'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 italic text-[10px]">
+                      {pay.reference_no ? `Ref: ${pay.reference_no} ` : ''}
+                      {pay.remarks || '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono font-black text-emerald-700">
+                      ₹{pAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-emerald-50/80 font-bold border-t-2 border-emerald-300 text-slate-900 text-[10px]">
+                <td colSpan="5" className="py-2 px-3 uppercase tracking-wider text-slate-700 text-right">
+                  Total Paid via Installments:
+                </td>
+                <td className="py-2 px-3 text-right font-mono font-black text-emerald-800 text-[11px]">
+                  ₹{payments.reduce((sum, p) => sum + Number(p.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
       {/* ── 4. CALCULATION SUMMARY & NOTES ── */}
       <div className="flex flex-col sm:flex-row justify-between items-start gap-4 my-4">
         
@@ -311,6 +470,17 @@ const PurchaseInvoicePrintTemplate = ({ purchase, storeInfo, ref }) => {
             <span>Paid: <strong className="text-white font-mono">₹{paidAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
             <span>Balance: <strong className={`font-mono ${pendingAmount > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>₹{pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
           </div>
+
+          {(shipments.length > 0 || payments.length > 0) && (
+            <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[9px] text-slate-400 font-medium">
+              {shipments.length > 0 && (
+                <span>Deliveries: <strong className="text-slate-200">{shipments.length} Installment{shipments.length > 1 ? 's' : ''}</strong></span>
+              )}
+              {payments.length > 0 && (
+                <span>Payments: <strong className="text-emerald-300">{payments.length} Installment{payments.length > 1 ? 's' : ''}</strong></span>
+              )}
+            </div>
+          )}
         </div>
 
       </div>

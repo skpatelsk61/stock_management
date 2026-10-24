@@ -125,7 +125,7 @@ export const getDashboardKPIs = async (req, res, next) => {
         AND t.active_expiry <= CURRENT_DATE()
     `);
 
-    // Category Distribution (Valuation & products count per category using FIFO batch cost)
+    // Category Distribution (Valuation, products count, sales & purchases per category)
     const [categoryDist] = await req.db.query(`
       SELECT c.name as name, COUNT(p.id) as value,
              COALESCE(
@@ -134,7 +134,9 @@ export const getDashboardKPIs = async (req, res, next) => {
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
                GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
-             ) as valuation
+             ) as valuation,
+             GREATEST(0, COALESCE((SELECT SUM(si.total) FROM sale_items si JOIN products pr_s ON si.product_id = pr_s.id WHERE pr_s.category_id = c.id), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN products pr_sr ON sr.product_id = pr_sr.id WHERE pr_sr.category_id = c.id), 0)) as sales,
+             GREATEST(0, COALESCE((SELECT SUM(pi.total) FROM purchase_items pi JOIN products pr_p ON pi.product_id = pr_p.id WHERE pr_p.category_id = c.id), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN products pr_pr ON pr.product_id = pr_pr.id WHERE pr_pr.category_id = c.id AND pr.status != 'Cancelled'), 0)) as purchases
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
@@ -210,8 +212,22 @@ export const getDashboardCharts = async (req, res, next) => {
     `);
 
     // Merge monthly sales and purchases and calculate Net Profit = Net Sales - COGS
+    // Ensure chronological 6-month continuous timeline for proper Line Graph
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      months.push(mStr);
+    }
+    // Also include any query months if outside standard window
+    [...salesTrend, ...purchaseTrend, ...grnTrend].forEach(item => {
+      if (item.month && !months.includes(item.month)) {
+        months.push(item.month);
+      }
+    });
+
     const monthlyTrends = [];
-    const months = [...new Set([...salesTrend.map(s => s.month), ...purchaseTrend.map(p => p.month), ...grnTrend.map(g => g.month)])];
     for (const m of months) {
       const sObj = salesTrend.find(s => s.month === m);
       const pVal = Math.max(0, Number(purchaseTrend.find(p => p.month === m)?.purchases || 0));
@@ -231,7 +247,7 @@ export const getDashboardCharts = async (req, res, next) => {
       });
     }
 
-    // 2. Category Distribution (Valuation & products count per category using FIFO batch cost)
+    // 2. Category Distribution (Valuation, products count, sales & purchases per category)
     const [categoryDist] = await req.db.query(`
       SELECT c.name as name, COUNT(p.id) as value,
              COALESCE(
@@ -240,7 +256,9 @@ export const getDashboardCharts = async (req, res, next) => {
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
                GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
-             ) as valuation
+             ) as valuation,
+             GREATEST(0, COALESCE((SELECT SUM(si.total) FROM sale_items si JOIN products pr_s ON si.product_id = pr_s.id WHERE pr_s.category_id = c.id), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN products pr_sr ON sr.product_id = pr_sr.id WHERE pr_sr.category_id = c.id), 0)) as sales,
+             GREATEST(0, COALESCE((SELECT SUM(pi.total) FROM purchase_items pi JOIN products pr_p ON pi.product_id = pr_p.id WHERE pr_p.category_id = c.id), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN products pr_pr ON pr.product_id = pr_pr.id WHERE pr_pr.category_id = c.id AND pr.status != 'Cancelled'), 0)) as purchases
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
@@ -1003,8 +1021,8 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     // ── 2. PERIOD TRENDS CHART DATA (trends) ──────────────────────────────────
     const [salesTrend] = await db.query(`
       SELECT ${salesLabelExpr} as label, 
-             GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0)) as revenue,
-             COALESCE((SELECT SUM(si.quantity) FROM sale_items si JOIN sales s2 ON si.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0) as units_sold
+             GREATEST(0, SUM(s.total - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr WHERE sr.sale_id = s.id), 0))) as revenue,
+             GREATEST(0, SUM(COALESCE((SELECT SUM(si.quantity) FROM sale_items si WHERE si.sale_id = s.id), 0) - COALESCE((SELECT SUM(sr.quantity) FROM sales_returns sr WHERE sr.sale_id = s.id), 0))) as units_sold
       FROM sales s
       ${salesWhere}
       GROUP BY label
@@ -1013,7 +1031,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
 
     const [purchTrend] = await db.query(`
       SELECT ${purchLabelExpr} as label, 
-             GREATEST(0, SUM(p.total) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND (pr.status IS NULL OR pr.status != 'Cancelled')), 0)) as expenses
+             GREATEST(0, SUM(p.total - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND (pr.status IS NULL OR pr.status != 'Cancelled')), 0))) as expenses
       FROM purchases p
       ${purchWhere}
       GROUP BY label
@@ -1074,7 +1092,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     const trends = Object.values(trendMap);
 
     // ── 3. TOP SELLING PRODUCTS ────────────────────────────────────────────────
-    const [topProducts] = await db.query(`
+    const [topProductsRaw] = await db.query(`
       SELECT pr.id, pr.name, pr.barcode,
              SUM(si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) as units_sold,
              SUM(si.total - COALESCE((SELECT SUM(refund_amount) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) as revenue
@@ -1086,9 +1104,14 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       ORDER BY revenue DESC
       LIMIT 10
     `, salesParams);
+    const topProducts = (topProductsRaw || []).map(p => ({
+      ...p,
+      units_sold: Number(p.units_sold) || 0,
+      revenue: Number(p.revenue) || 0
+    }));
 
     // ── 4. CATEGORY SALES BREAKDOWN ───────────────────────────────────────────
-    const [categoryDist] = await db.query(`
+    const [categoryDistRaw] = await db.query(`
       SELECT c.name as name, 
              COALESCE(SUM(si.total - COALESCE((SELECT SUM(refund_amount) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)), 0) as value
       FROM categories c
@@ -1100,14 +1123,23 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       HAVING value > 0
       ORDER BY value DESC
     `, salesParams);
+    const categoryDist = (categoryDistRaw || []).map(c => ({
+      name: c.name,
+      value: Number(c.value) || 0
+    }));
 
     // ── 5. STOCK MOVEMENT LOGS COUNT ──────────────────────────────────────────
-    const [movementCounts] = await db.query(`
+    const [movementCountsRaw] = await db.query(`
       SELECT sl.type, COUNT(sl.id) as count, COALESCE(SUM(sl.quantity), 0) as units
       FROM stock_logs sl
       ${logsWhere}
       GROUP BY sl.type
     `, logsParams);
+    const movementCounts = (movementCountsRaw || []).map(m => ({
+      ...m,
+      count: Number(m.count) || 0,
+      units: Number(m.units) || 0
+    }));
 
     // ── 6. RECENT STOCK MOVEMENT LOGS DETAILS ─────────────────────────────────
     const [movementLogs] = await db.query(`
@@ -1122,7 +1154,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     `, logsParams);
 
     // ── 7. TOP PURCHASED PRODUCTS ─────────────────────────────────────────────
-    const [topPurchased] = await db.query(`
+    const [topPurchasedRaw] = await db.query(`
       SELECT pr.id, pr.name, pr.barcode,
              SUM(pi.quantity - COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id AND (status IS NULL OR status != 'Cancelled')), 0)) as units_purchased,
              SUM(pi.total - COALESCE((SELECT SUM(total_amount) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id AND (status IS NULL OR status != 'Cancelled')), 0)) as total_expenses
@@ -1134,9 +1166,14 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       ORDER BY total_expenses DESC
       LIMIT 10
     `, purchParams);
+    const topPurchased = (topPurchasedRaw || []).map(p => ({
+      ...p,
+      units_purchased: Number(p.units_purchased) || 0,
+      total_expenses: Number(p.total_expenses) || 0
+    }));
 
     // ── 8. TOP CUSTOMERS ──────────────────────────────────────────────────────
-    const [topCustomers] = await db.query(`
+    const [topCustomersRaw] = await db.query(`
       SELECT c.id, c.name, c.phone, COALESCE(SUM(s.total), 0) as total_spent, COUNT(s.id) as sales_count
       FROM customers c
       JOIN sales s ON c.id = s.customer_id
@@ -1145,9 +1182,14 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       ORDER BY total_spent DESC
       LIMIT 5
     `, salesParams);
+    const topCustomers = (topCustomersRaw || []).map(c => ({
+      ...c,
+      total_spent: Number(c.total_spent) || 0,
+      sales_count: Number(c.sales_count) || 0
+    }));
 
     // ── 9. TOP SUPPLIERS ──────────────────────────────────────────────────────
-    const [topSuppliers] = await db.query(`
+    const [topSuppliersRaw] = await db.query(`
       SELECT v.id, COALESCE(v.company_name, v.name) as name, v.phone, COALESCE(SUM(p.total), 0) as total_procured, COUNT(p.id) as purchase_count
       FROM vendors v
       JOIN purchases p ON v.id = p.vendor_id
@@ -1156,6 +1198,11 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       ORDER BY total_procured DESC
       LIMIT 5
     `, purchParams);
+    const topSuppliers = (topSuppliersRaw || []).map(v => ({
+      ...v,
+      total_procured: Number(v.total_procured) || 0,
+      purchase_count: Number(v.purchase_count) || 0
+    }));
 
     return res.status(200).json({
       success: true,

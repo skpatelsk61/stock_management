@@ -142,34 +142,50 @@ const CustomerList = () => {
     fetchCustomers();
     fetchKPIs();
 
-    const handleSync = () => {
-      fetchCustomers(true);
-      fetchKPIs();
+    let syncTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedSync = () => {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        fetchCustomers(true);
+        fetchKPIs();
+      }, 350);
     };
 
-    window.addEventListener('sales-updated', handleSync);
-    window.addEventListener('borrow-updated', handleSync);
-    window.addEventListener('customer-updated', handleSync);
-    window.addEventListener('focus', handleSync);
+    const handleFocusSync = () => {
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        fetchCustomers(true);
+        fetchKPIs();
+      }
+    };
+
+    window.addEventListener('sales-updated', handleDebouncedSync);
+    window.addEventListener('borrow-updated', handleDebouncedSync);
+    window.addEventListener('customer-updated', handleDebouncedSync);
+    window.addEventListener('focus', handleFocusSync);
 
     const handleStorage = (e) => {
       if (e.key === 'sales_sync_signal') {
-        handleSync();
+        handleDebouncedSync();
       }
     };
     window.addEventListener('storage', handleStorage);
 
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        handleSync();
+        fetchCustomers(true);
+        fetchKPIs();
       }
-    }, 10000);
+    }, 30000);
 
     return () => {
-      window.removeEventListener('sales-updated', handleSync);
-      window.removeEventListener('borrow-updated', handleSync);
-      window.removeEventListener('customer-updated', handleSync);
-      window.removeEventListener('focus', handleSync);
+      clearTimeout(syncTimer);
+      window.removeEventListener('sales-updated', handleDebouncedSync);
+      window.removeEventListener('borrow-updated', handleDebouncedSync);
+      window.removeEventListener('customer-updated', handleDebouncedSync);
+      window.removeEventListener('focus', handleFocusSync);
       window.removeEventListener('storage', handleStorage);
       clearInterval(interval);
     };

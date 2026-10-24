@@ -140,34 +140,49 @@ const SalesList = () => {
     }
   }, [sales.length]);
 
-  // Real-Time Event Listeners & Live Polling (Every 8 seconds)
+  // Real-Time Event Listeners & Live Polling (Debounced & Visibility-Aware)
   useEffect(() => {
     fetchSales(false);
     fetchStoreSettings();
 
-    const handleEventUpdate = () => {
-      fetchSales(true);
-      fetchStoreSettings();
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchSales(true);
+      }, 350);
     };
 
-    window.addEventListener('focus', handleEventUpdate);
-    window.addEventListener('sales-updated', handleEventUpdate);
-    window.addEventListener('stock-changed', handleEventUpdate);
-    window.addEventListener('inventory-updated', handleEventUpdate);
-    window.addEventListener('storage', handleEventUpdate);
+    const handleFocusUpdate = () => {
+      // Throttle window focus refetching to max once every 60s
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        fetchSales(true);
+      }
+    };
 
-    // Live real-time polling interval: every 8 seconds
+    window.addEventListener('focus', handleFocusUpdate);
+    window.addEventListener('sales-updated', handleDebouncedUpdate);
+    window.addEventListener('stock-changed', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
+    window.addEventListener('storage', handleDebouncedUpdate);
+
+    // Live background polling: 30 seconds, only if tab is visible
     const interval = setInterval(() => {
+      if (document.hidden) return;
       fetchSales(true);
-    }, 8000);
+    }, 30000);
 
     return () => {
+      clearTimeout(debounceTimer);
       clearInterval(interval);
-      window.removeEventListener('focus', handleEventUpdate);
-      window.removeEventListener('sales-updated', handleEventUpdate);
-      window.removeEventListener('stock-changed', handleEventUpdate);
-      window.removeEventListener('inventory-updated', handleEventUpdate);
-      window.removeEventListener('storage', handleEventUpdate);
+      window.removeEventListener('focus', handleFocusUpdate);
+      window.removeEventListener('sales-updated', handleDebouncedUpdate);
+      window.removeEventListener('stock-changed', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
+      window.removeEventListener('storage', handleDebouncedUpdate);
     };
   }, [fetchSales, fetchStoreSettings]);
 
@@ -759,81 +774,81 @@ const SalesList = () => {
         ) : (
           <div className="space-y-4">
             {/* Table wrapper — comfortable height without squishing */}
-            <div className="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-xl">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+              <table className="w-full min-w-[1240px] text-left border-collapse text-xs">
                 <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/80 z-10 shadow-xs backdrop-blur-xs">
                   <tr className="border-b border-slate-200 dark:border-slate-700 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3.5 px-4 text-center">#</th>
-                    <th className="py-3.5 px-4 cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'invoiceNo' ? 'newest' : 'invoiceNo')}>
+                    <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[50px]">#</th>
+                    <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[140px] cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'invoiceNo' ? 'newest' : 'invoiceNo')}>
                       <div className="flex items-center gap-1">
                         <span>Invoice No.</span>
                         <ArrowsUpDownIcon className="w-3 h-3 opacity-60" />
                       </div>
                     </th>
-                    <th className="py-3.5 px-4">Customer Details</th>
-                    <th className="py-3.5 px-4">Warehouse</th>
-                    <th className="py-3.5 px-4 cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')}>
+                    <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[180px]">Customer Details</th>
+                    <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[150px] cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')}>
                       <div className="flex items-center gap-1">
                         <span>Date & Time</span>
                         <ArrowsUpDownIcon className="w-3 h-3 opacity-60" />
                       </div>
                     </th>
-                    <th className="py-3.5 px-4">Product Summary</th>
-                    <th className="py-3.5 px-4 text-center">Items</th>
-                    <th className="py-3.5 px-4 text-right cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'highestTotal' ? 'lowestTotal' : 'highestTotal')}>
+                    <th className="py-3.5 px-3.5 whitespace-nowrap min-w-[200px]">Product Summary</th>
+                    <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[70px]">Items</th>
+                    <th className="py-3.5 px-3.5 text-right whitespace-nowrap min-w-[120px] cursor-pointer hover:text-emerald-600" onClick={() => setSortBy(sortBy === 'highestTotal' ? 'lowestTotal' : 'highestTotal')}>
                       <div className="flex items-center justify-end gap-1">
                         <span>Grand Total</span>
                         <ArrowsUpDownIcon className="w-3 h-3 opacity-60" />
                       </div>
                     </th>
-                    <th className="py-3.5 px-4 text-center">Method</th>
-                    <th className="py-3.5 px-4 text-center">Payment Status</th>
-                    <th className="py-3.5 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[150px]">Method</th>
+                    <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[130px]">Payment Status</th>
+                    <th className="py-3.5 px-3.5 text-center whitespace-nowrap min-w-[190px]">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-medium text-slate-650 dark:text-slate-300">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-semibold text-slate-650 dark:text-slate-300">
                   {paginatedSales.map((sale, idx) => {
                     const rowNumber = (currentPage - 1) * pageSize + idx + 1;
                     return (
                       <tr key={`sale-${sale.id}-${idx}`} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition-colors">
-                        <td className="py-3 px-4 text-slate-400 font-mono text-[10px] text-center">{rowNumber}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-slate-950 dark:text-white">
-                          <span className="hover:underline cursor-pointer" onClick={() => setViewingSale(sale)}>
+                        <td className="py-3 px-3.5 text-slate-400 font-mono text-[10px] text-center whitespace-nowrap">{rowNumber}</td>
+                        <td className="py-3 px-3.5 font-mono font-bold text-slate-950 dark:text-white whitespace-nowrap">
+                          <span className="hover:underline cursor-pointer whitespace-nowrap" onClick={() => setViewingSale(sale)}>
                             {sale.invoiceNo}
                           </span>
                         </td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900 dark:text-slate-100">{sale.customerName}</div>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <div className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">{sale.customerName}</div>
                           {sale.customerPhone && (
-                            <div className="text-[10px] font-mono text-slate-400">{sale.customerPhone}</div>
+                            <div className="text-[10px] font-mono text-slate-400 whitespace-nowrap">{sale.customerPhone}</div>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-slate-500 font-semibold">{sale.warehouseName}</td>
-                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                          <span>{sale.date}</span>
-                          {sale.time && (
-                            <span className="text-[10px] ml-1.5 text-slate-400 font-mono">({sale.time})</span>
-                          )}
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <div className="flex flex-col leading-tight">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">{sale.date}</span>
+                            {sale.time && (
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap mt-0.5">{sale.time}</span>
+                            )}
+                          </div>
                         </td>
-                        <td className="py-3 px-4 max-w-[220px] truncate text-slate-500 dark:text-slate-400" title={sale.productsSummary}>
+                        <td className="py-3 px-3.5 max-w-[260px] truncate text-slate-500 dark:text-slate-400 whitespace-nowrap" title={sale.productsSummary}>
                           {sale.productsSummary}
                         </td>
-                        <td className="py-3 px-4 text-center font-bold text-slate-700 dark:text-slate-300">{sale.quantity}</td>
-                        <td className="py-3 px-4 text-right font-black text-slate-900 dark:text-white tabular-nums">
+                        <td className="py-3 px-3.5 text-center font-bold text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">{sale.quantity}</td>
+                        <td className="py-3 px-3.5 text-right font-black text-slate-900 dark:text-white tabular-nums whitespace-nowrap">
                           ₹{Number(sale.total || 0).toFixed(2)}
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold text-slate-700 dark:text-slate-300">
+                        <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                          <span className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-md text-[10px] font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap inline-flex items-center justify-center border border-slate-200 dark:border-slate-700">
                             {sale.paymentMethod}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${fetchStatusStyle(sale.paymentStatus)}`}>
+                        <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold whitespace-nowrap inline-flex items-center justify-center border ${fetchStatusStyle(sale.paymentStatus)}`}>
                             {sale.paymentStatus}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex justify-end gap-1.5">
+                        <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                             <button
                               onClick={async () => {
                                 try {
@@ -856,14 +871,14 @@ const SalesList = () => {
                                   });
                                 }
                               }}
-                              className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 rounded-md text-[10px] font-bold border border-emerald-200/60 dark:border-emerald-800 transition-colors cursor-pointer"
+                              className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 rounded-md text-[10px] font-bold border border-emerald-200/60 dark:border-emerald-800 transition-colors cursor-pointer whitespace-nowrap"
                             >
                               View Invoice
                             </button>
                             {!isReadOnly && (
                               <Link
                                 to={`/dashboard/sales/returns?invoiceNo=${encodeURIComponent(sale.invoiceNo)}`}
-                                className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 rounded-md text-[10px] font-bold border border-amber-200 dark:border-amber-800 transition-colors cursor-pointer flex items-center gap-1"
+                                className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 rounded-md text-[10px] font-bold border border-amber-200 dark:border-amber-800 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
                               >
                                 <ArrowPathIcon className="w-3 h-3 stroke-[2.5]" /> Return
                               </Link>
@@ -871,12 +886,12 @@ const SalesList = () => {
                             {!isReadOnly ? (
                               <button
                                 onClick={() => handleOpenDeleteConfirm(sale.id)}
-                                className="px-2 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 rounded-md text-[10px] font-bold border border-rose-200 dark:border-rose-800 transition-colors cursor-pointer"
+                                className="px-2 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 rounded-md text-[10px] font-bold border border-rose-200 dark:border-rose-800 transition-colors cursor-pointer whitespace-nowrap"
                               >
                                 Void
                               </button>
                             ) : (
-                              <span className="text-[10px] font-bold text-slate-400 self-center">Locked</span>
+                              <span className="text-[10px] font-bold text-slate-400 self-center whitespace-nowrap">Locked</span>
                             )}
                           </div>
                         </td>
@@ -1105,39 +1120,39 @@ const SalesList = () => {
                   </span>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
+                  <table className="w-full min-w-[700px] text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50/50 dark:bg-slate-750 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-slate-700">
-                        <th className="py-2.5 px-4 text-center">#</th>
-                        <th className="py-2.5 px-4">Product Name</th>
-                        <th className="py-2.5 px-4 text-center">Batch No</th>
-                        <th className="py-2.5 px-4 text-right">MRP</th>
-                        <th className="py-2.5 px-4 text-center">Qty</th>
-                        <th className="py-2.5 px-4 text-right">Selling Price</th>
-                        <th className="py-2.5 px-4 text-center">GST %</th>
-                        <th className="py-2.5 px-4 text-right">Total Amount</th>
+                        <th className="py-2.5 px-4 text-center whitespace-nowrap min-w-[40px]">#</th>
+                        <th className="py-2.5 px-4 whitespace-nowrap min-w-[180px]">Product Name</th>
+                        <th className="py-2.5 px-4 text-center whitespace-nowrap min-w-[100px]">Batch No</th>
+                        <th className="py-2.5 px-4 text-right whitespace-nowrap min-w-[80px]">MRP</th>
+                        <th className="py-2.5 px-4 text-center whitespace-nowrap min-w-[70px]">Qty</th>
+                        <th className="py-2.5 px-4 text-right whitespace-nowrap min-w-[100px]">Selling Price</th>
+                        <th className="py-2.5 px-4 text-center whitespace-nowrap min-w-[70px]">GST %</th>
+                        <th className="py-2.5 px-4 text-right whitespace-nowrap min-w-[100px]">Total Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700 font-semibold text-slate-700 dark:text-slate-300">
                       {(viewingSale.items || []).map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-750">
-                          <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-[10px]">{idx + 1}</td>
-                          <td className="py-2.5 px-4">
-                            <span className="font-bold text-slate-900 dark:text-white block">{item.productName || item.name || item.product_name}</span>
-                            {item.barcode && <span className="text-[9px] font-mono text-slate-400 block">{item.barcode}</span>}
+                          <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-[10px] whitespace-nowrap">{idx + 1}</td>
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            <span className="font-bold text-slate-900 dark:text-white block whitespace-nowrap">{item.productName || item.name || item.product_name}</span>
+                            {item.barcode && <span className="text-[9px] font-mono text-slate-400 block whitespace-nowrap">{item.barcode}</span>}
                           </td>
-                          <td className="py-2.5 px-4 text-center">
-                            <span className="px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded font-mono font-bold text-[10px] border border-emerald-200/60 dark:border-emerald-800">
+                          <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                            <span className="px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded font-mono font-bold text-[10px] border border-emerald-200/60 dark:border-emerald-800 whitespace-nowrap">
                               {item.batchNumber || item.batch_number || 'DEFAULT'}
                             </span>
                           </td>
-                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
                             ₹{Number(item.mrp || item.sellingPrice || 0).toFixed(2)}
                           </td>
-                          <td className="py-2.5 px-4 text-center tabular-nums">{item.quantity} {item.unit || 'Pcs'}</td>
-                          <td className="py-2.5 px-4 text-right tabular-nums">₹{Number(item.sellingPrice || item.price || item.selling_price || 0).toFixed(2)}</td>
-                          <td className="py-2.5 px-4 text-center tabular-nums text-slate-500">{item.gst || 0}%</td>
-                          <td className="py-2.5 px-4 text-right font-black text-slate-900 dark:text-white tabular-nums">₹{Number(item.total || 0).toFixed(2)}</td>
+                          <td className="py-2.5 px-4 text-center tabular-nums whitespace-nowrap">{item.quantity} {item.unit || 'Pcs'}</td>
+                          <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">₹{Number(item.sellingPrice || item.price || item.selling_price || 0).toFixed(2)}</td>
+                          <td className="py-2.5 px-4 text-center tabular-nums text-slate-500 whitespace-nowrap">{item.gst || 0}%</td>
+                          <td className="py-2.5 px-4 text-right font-black text-slate-900 dark:text-white tabular-nums whitespace-nowrap">₹{Number(item.total || 0).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -339,13 +339,19 @@ export const createProduct = async (req, res, next) => {
     let resolvedBrandId = brand_id || null;
     let brandText = brand ? brand.trim() : null;
     if (!resolvedBrandId && brandText) {
-      const [brands] = await req.db.query('SELECT id FROM brands WHERE LOWER(name) = LOWER(?)', [brandText]);
+      let brandQuery = 'SELECT id FROM brands WHERE LOWER(name) = LOWER(?)';
+      const bParams = [brandText];
+      if (resolvedSubCatId) {
+        brandQuery += ' AND sub_category_id = ?';
+        bParams.push(resolvedSubCatId);
+      }
+      const [brands] = await req.db.query(brandQuery, bParams);
       if (brands.length > 0) {
         resolvedBrandId = brands[0].id;
       } else {
         const [newBrand] = await req.db.query(
-          'INSERT INTO brands (name, status) VALUES (?, "Active")',
-          [brandText]
+          'INSERT INTO brands (name, category_id, sub_category_id, status) VALUES (?, ?, ?, "Active")',
+          [brandText, resolvedCatId, resolvedSubCatId]
         );
         resolvedBrandId = newBrand.insertId;
       }
@@ -495,16 +501,19 @@ export const updateProduct = async (req, res, next) => {
       const [brandRow] = await req.db.query('SELECT name FROM brands WHERE id = ?', [resolvedBrandId]);
       if (brandRow.length > 0) brandText = brandRow[0].name;
     } else if (brandText) {
-      const [brandMatch] = await req.db.query(
-        'SELECT id FROM brands WHERE LOWER(name) = LOWER(?)',
-        [brandText]
-      );
+      let brandQuery = 'SELECT id FROM brands WHERE LOWER(name) = LOWER(?)';
+      const bParams = [brandText];
+      if (resolvedSubCatId) {
+        brandQuery += ' AND sub_category_id = ?';
+        bParams.push(resolvedSubCatId);
+      }
+      const [brandMatch] = await req.db.query(brandQuery, bParams);
       if (brandMatch.length > 0) {
         resolvedBrandId = brandMatch[0].id;
       } else {
         const [newBrand] = await req.db.query(
-          'INSERT INTO brands (name, status) VALUES (?, "Active")',
-          [brandText]
+          'INSERT INTO brands (name, category_id, sub_category_id, status) VALUES (?, ?, ?, "Active")',
+          [brandText, resolvedCatId, resolvedSubCatId]
         );
         resolvedBrandId = newBrand.insertId;
       }

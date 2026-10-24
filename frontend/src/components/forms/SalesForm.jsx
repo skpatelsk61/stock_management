@@ -19,8 +19,8 @@ import {
     QrCodeIcon,
     CalendarDaysIcon,
     HashtagIcon,
-    UserPlusIcon,
     ChevronDownIcon,
+    ChevronRightIcon,
     QuestionMarkCircleIcon,
     CommandLineIcon,
 } from '@heroicons/react/24/outline';
@@ -71,6 +71,16 @@ const isDiscreteUnit = (unitStr) => {
     return !metricKeywords.includes(u);
 };
 
+// Module-level in-memory cache for POS products & customers
+let cachedPosData = {
+    products: null,
+    customers: null,
+    timestamp: 0
+};
+
+export const invalidatePosDataCache = () => {
+    cachedPosData = { products: null, customers: null, timestamp: 0 };
+};
 
 const SalesForm = ({ sale, onSubmit, onCancel }) => {
     const { user } = useAppSelector((state) => state.auth);
@@ -113,15 +123,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
     // Searchable Customer Select States
     const [searchCustomer, setSearchCustomer] = useState('');
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-
-    // Add Customer Popup Modal States
-    const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
-    const [newCustType, setNewCustType] = useState('Walk-in');
-    const [newCustName, setNewCustName] = useState('');
-    const [newCustPhone, setNewCustPhone] = useState('');
-    const [newCustAddress, setNewCustAddress] = useState('');
-    const [newCustPaymentMode, setNewCustPaymentMode] = useState('Cash');
-    const [newCustNotes, setNewCustNotes] = useState('');
 
     // Credit / Borrow Parameters
     const [dueDate, setDueDate] = useState(
@@ -169,26 +170,43 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
-    const [productsList, setProductsList] = useState([]);
-    const [customersList, setCustomersList] = useState([]);
-    const [loadingProducts, setLoadingProducts] = useState(false);
+    const [productsList, setProductsList] = useState(() => cachedPosData.products || []);
+    const [customersList, setCustomersList] = useState(() => cachedPosData.customers || []);
+    const [loadingProducts, setLoadingProducts] = useState(() => !cachedPosData.products);
     const showToast = (msg, type = 'error') => {
         if (type === 'error') toast.error(msg);
         else toast.success(msg);
     };
 
-    /* ── Load Products & Customers from API ── */
-    const fetchProductsAndCustomers = async () => {
-        setLoadingProducts(true);
+    /* ── Load Products & Customers from API with Smart Caching ── */
+    const fetchProductsAndCustomers = async (force = false) => {
+        const isFresh = cachedPosData.products && (Date.now() - cachedPosData.timestamp < 60000);
+        if (!force && isFresh) {
+            setProductsList(cachedPosData.products);
+            setCustomersList(cachedPosData.customers || []);
+            setLoadingProducts(false);
+            return;
+        }
+
+        if (!cachedPosData.products) {
+            setLoadingProducts(true);
+        }
         try {
             const [prodRes, custRes] = await Promise.all([
                 productsAPI.getAll({ limit: 500 }),
                 customersAPI.getAll().catch(() => ({ customers: [] })),
             ]);
-            if (prodRes.success) setProductsList(prodRes.products || []);
-            if (custRes.success || custRes.customers) setCustomersList(custRes.customers || []);
+            if (prodRes?.success && Array.isArray(prodRes.products)) {
+                cachedPosData.products = prodRes.products;
+                setProductsList(prodRes.products);
+            }
+            if (custRes?.success || custRes?.customers) {
+                cachedPosData.customers = custRes.customers || [];
+                setCustomersList(custRes.customers || []);
+            }
+            cachedPosData.timestamp = Date.now();
         } catch (err) {
-            console.warn('API lookup failed, loading locally...');
+            console.warn('POS API lookup failed, falling back to cache...');
         } finally {
             setLoadingProducts(false);
         }
@@ -197,21 +215,26 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
     useEffect(() => {
         fetchProductsAndCustomers();
 
+        let syncTimer = null;
         const handleCustSync = () => {
-            customersAPI.getAll().then((custRes) => {
-                if (custRes?.success || custRes?.customers) {
-                    setCustomersList(custRes.customers || []);
-                }
-            }).catch(() => {});
+            clearTimeout(syncTimer);
+            syncTimer = setTimeout(() => {
+                customersAPI.getAll().then((custRes) => {
+                    if (custRes?.success || custRes?.customers) {
+                        const updated = custRes.customers || [];
+                        cachedPosData.customers = updated;
+                        setCustomersList(updated);
+                    }
+                }).catch(() => {});
+            }, 300);
         };
 
         window.addEventListener('customer-updated', handleCustSync);
         window.addEventListener('borrow-updated', handleCustSync);
-        window.addEventListener('focus', handleCustSync);
         return () => {
+            clearTimeout(syncTimer);
             window.removeEventListener('customer-updated', handleCustSync);
             window.removeEventListener('borrow-updated', handleCustSync);
-            window.removeEventListener('focus', handleCustSync);
         };
     }, []);
 
@@ -244,19 +267,85 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
             .slice(0, 10);
     }, [searchCustomer, customersList, customerType]);
 
-    /* ── Product Suggestions Dropdown ── */
-    const filteredProducts = useMemo(() => {
+    /* ── Grouped Products by Name & Brand with Weight Variants (Tree Structure) ── */
+    const [collapsedGroups, setCollapsedGroups] = useState({});
+
+    const toggleGroupCollapse = (grpKey, e) => {
+        e?.stopPropagation?.();
+        setCollapsedGroups((prev) => ({
+            ...prev,
+            [grpKey]: !prev[grpKey]
+        }));
+    };
+
+    const handleExpandAll = (e) => {
+        e?.stopPropagation?.();
+        setCollapsedGroups({});
+    };
+
+    const handleCollapseAll = (e) => {
+        e?.stopPropagation?.();
+        const all = {};
+        groupedProducts.forEach((g) => {
+            all[g.key] = true;
+        });
+        setCollapsedGroups(all);
+    };
+
+    const groupedProducts = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
-        if (!q || productsList.length === 0) return productsList.slice(0, 20);
-        return productsList
-            .filter(
-                (p) =>
-                    (p.name || '').toLowerCase().includes(q) ||
-                    (p.barcode || '').includes(q) ||
-                    (p.sku || '').toLowerCase().includes(q)
-            )
-            .slice(0, 15);
+        const groups = {};
+
+        // Filter products matching search query across Name, Brand, Barcode, SKU, Weight (measurement_value), or Unit
+        const matched = productsList.filter((p) => {
+            if (!q) return true;
+            const name = (p.name || '').toLowerCase();
+            const brand = (p.brand || '').toLowerCase();
+            const barcode = String(p.barcode || '').toLowerCase();
+            const sku = String(p.sku || '').toLowerCase();
+            const weight = String(p.measurement_value || '').toLowerCase();
+            const unit = String(p.unit || '').toLowerCase();
+            return (
+                name.includes(q) ||
+                brand.includes(q) ||
+                barcode.includes(q) ||
+                sku.includes(q) ||
+                weight.includes(q) ||
+                unit.includes(q)
+            );
+        });
+
+        matched.forEach((p) => {
+            const nameStr = (p.name || '').trim();
+            const brandStr = (p.brand || '').trim();
+            const grpKey = `${nameStr.toLowerCase()}__${brandStr.toLowerCase()}`;
+            const displayName = brandStr ? `${nameStr} (${brandStr})` : nameStr;
+
+            if (!groups[grpKey]) {
+                groups[grpKey] = {
+                    key: grpKey,
+                    name: nameStr,
+                    brand: brandStr,
+                    displayName,
+                    totalStock: 0,
+                    variants: []
+                };
+            }
+            const stock = Number(p.total_stock ?? p.stock ?? p.currentStock ?? 0);
+            groups[grpKey].totalStock += stock;
+            groups[grpKey].variants.push({
+                ...p,
+                stock
+            });
+        });
+
+        return Object.values(groups);
     }, [searchQuery, productsList]);
+
+    /* ── Flattened matched variants for keyboard navigation and quick lookups ── */
+    const filteredProducts = useMemo(() => {
+        return groupedProducts.flatMap((g) => g.variants);
+    }, [groupedProducts]);
 
     const isInCart = (id) => items.some((i) => i.productId === id);
 
@@ -303,6 +392,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         {
                             productId: product.id,
                             name: product.name,
+                            brand: product.brand || '',
                             barcode: product.barcode || '',
                             unit: baseUnit,
                             selectedUnit: baseUnit,
@@ -468,50 +558,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
         sale?.invoiceNo || sale?.invoice_no || `INV-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`
     );
 
-    /* ── Save New Customer directly ── */
-    const handleAddNewCustomerSubmit = async (e) => {
-        e.preventDefault();
-        const cleanedPhone = newCustPhone ? newCustPhone.replace(/\D/g, '') : '';
-        if (!newCustName || !cleanedPhone) {
-            toast.error('Please provide customer name and mobile.');
-            return;
-        }
-        if (cleanedPhone.length !== 10) {
-            toast.error('Mobile number must be exactly 10 digits.');
-            return;
-        }
-        try {
-            const res = await customersAPI.create({
-                name: newCustName,
-                phone: cleanedPhone,
-                address: newCustAddress || null,
-                customer_type: newCustType,
-                payment_mode: newCustPaymentMode,
-                notes: newCustNotes || null,
-                status: 'Active',
-            });
-            if (res.success) {
-                toast.success('Customer registered to master database successfully!');
-                const custRes = await customersAPI.getAll();
-                if (custRes.success || custRes.customers) {
-                    setCustomersList(custRes.customers || []);
-                }
-                setCustomerId(res.customer.id);
-                setCustomerName(res.customer.name);
-                setCustomerPhone(res.customer.phone || '');
-                setCustomerType(res.customer.customer_type);
-                setPaymentMethod(res.customer.payment_mode || 'Cash');
-                setNewCustName('');
-                setNewCustPhone('');
-                setNewCustAddress('');
-                setNewCustNotes('');
-                setShowAddCustomerModal(false);
-            }
-        } catch (err) {
-            toast.error(err.response?.data?.message || 'Error creating customer');
-        }
-    };
-
     /* ── Submit POS checkout ── */
     const handleSubmit = () => {
         if (items.length === 0) {
@@ -632,10 +678,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                     setShowShortcutsHelpModal(false);
                     return;
                 }
-                if (showAddCustomerModal) {
-                    setShowAddCustomerModal(false);
-                    return;
-                }
                 if (showDropdown) {
                     setShowDropdown(false);
                     return;
@@ -723,12 +765,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 return;
             }
 
-            if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
-                e.preventDefault();
-                setShowAddCustomerModal(true);
-                return;
-            }
-
             // Cart Row Selection / Deletion when not inside text inputs
             if (!isInputTarget) {
                 if (e.key === 'Delete' && selectedCartIndex >= 0 && selectedCartIndex < items.length) {
@@ -788,7 +824,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
         showDropdown,
         showCustomerDropdown,
         showShortcutsHelpModal,
-        showAddCustomerModal,
         filteredProducts,
         customerType,
         customerId,
@@ -899,8 +934,8 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                 (p) => p.name?.toLowerCase() === query.toLowerCase()
                                             );
                                         }
-                                        if (!match && filteredProducts.length === 1) {
-                                            match = filteredProducts[0];
+                                        if (!match && groupedProducts.length === 1 && groupedProducts[0].variants.length === 1) {
+                                            match = groupedProducts[0].variants[0];
                                         }
                                         if (match) {
                                             handleAddProduct(match);
@@ -912,75 +947,160 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         </div>
 
                         {showDropdown && (
-                            <div className="mt-2 bg-white dark:bg-[#1a1f2e] border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl dark:shadow-2xl dark:shadow-black/60 max-h-52 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 z-30 relative">
-                                {filteredProducts.length === 0 ? (
+                            <div className="mt-2 bg-white dark:bg-[#1a1f2e] border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xl dark:shadow-2xl dark:shadow-black/60 max-h-[360px] overflow-y-auto custom-scrollbar p-2 space-y-1.5 z-30 relative">
+                                {groupedProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-gray-400 dark:text-slate-500 font-medium">
                                         {searchQuery ? 'No matching products found' : 'Start typing to search...'}
                                     </div>
                                 ) : (
-                                    filteredProducts.map((p, idx) => {
-                                        const inCart = isInCart(p.id);
-                                        const stock = Number(p.total_stock || p.stock || 0);
-                                        const isHighlighted = highlightedSearchIndex === idx;
-                                        return (
-                                            <div
-                                                key={p.id}
-                                                onClick={() =>
-                                                    inCart
-                                                        ? handleRemoveItem(
-                                                              items.findIndex((i) => i.productId === p.id)
-                                                          )
-                                                        : handleAddProduct(p)
-                                                }
-                                                className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
-                                                    isHighlighted
-                                                        ? 'bg-[#0F4C3A]/10 dark:bg-emerald-950/80 ring-2 ring-[#0F4C3A] dark:ring-emerald-500'
-                                                        : inCart
-                                                        ? 'bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                                                        : 'hover:bg-gray-50 dark:hover:bg-[#21262d]'
-                                                }`}
+                                    <>
+                                        {/* Dropdown Toolbar */}
+                                        <div className="flex items-center justify-between pb-1.5 px-1 border-b border-gray-100 dark:border-slate-800 text-[11px] font-semibold text-gray-500 dark:text-slate-400 select-none">
+                                            <span className="flex items-center gap-1.5">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-[#0F4C3A] dark:bg-emerald-400"></span>
+                                                <span>{groupedProducts.length} Product{groupedProducts.length === 1 ? '' : 's'}</span>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    const allCollapsed = groupedProducts.every((g) => collapsedGroups[g.key]);
+                                                    if (allCollapsed) handleExpandAll(e);
+                                                    else handleCollapseAll(e);
+                                                }}
+                                                className="text-[#0F4C3A] dark:text-emerald-400 hover:underline font-bold cursor-pointer text-[10px]"
                                             >
+                                                {groupedProducts.every((g) => collapsedGroups[g.key]) ? 'Expand All' : 'Collapse All'}
+                                            </button>
+                                        </div>
+
+                                        {/* Tree Structure Product Groups */}
+                                        {groupedProducts.map((grp) => {
+                                            const isCollapsed = Boolean(collapsedGroups[grp.key]);
+                                            const anyInCart = grp.variants.some((v) => isInCart(v.id));
+
+                                            return (
                                                 <div
-                                                    className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 font-bold text-xs ${
-                                                        inCart
-                                                            ? 'bg-emerald-100 dark:bg-emerald-900/50 text-[#0F4C3A] dark:text-emerald-300'
-                                                            : 'bg-gray-100 dark:bg-[#0d101a] text-gray-500 dark:text-slate-500'
+                                                    key={grp.key}
+                                                    className={`border rounded-xl overflow-hidden transition-all shadow-2xs ${
+                                                        anyInCart
+                                                            ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/15 dark:bg-emerald-950/20'
+                                                            : 'border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#141824]'
                                                     }`}
                                                 >
-                                                    {(p.name || '?').charAt(0).toUpperCase()}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-semibold text-gray-800 dark:text-slate-200 truncate">
-                                                        {p.name}
-                                                    </p>
-                                                    <p className="text-[10px] text-gray-500 dark:text-slate-400 font-medium">
-                                                        {p.barcode || '—'} · {p.measurement_value ? `${p.unit || 'Pcs'} (${p.measurement_value})` : p.unit || 'Pcs'} · Stock:{' '}
-                                                        <span
-                                                            className={
-                                                                stock <= 0 ? 'text-red-500 dark:text-red-400' : 'text-[#0F4C3A] dark:text-emerald-400'
-                                                            }
-                                                        >
-                                                            {stock}
-                                                        </span>
-                                                    </p>
-                                                </div>
-                                                <div className="text-right flex-shrink-0 text-xs">
-                                                    <p className="font-bold text-gray-800 dark:text-slate-200">
-                                                        ₹{Number(p.selling_price || p.sellingPrice || 0).toFixed(2)}
-                                                    </p>
-                                                    {inCart ? (
-                                                        <span className="text-[9px] font-bold text-[#0F4C3A] dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">
-                                                            ✓ In Cart
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[9px] font-bold text-[#0F4C3A] dark:text-emerald-400">
-                                                            + Add
-                                                        </span>
+                                                    {/* Parent Group Header (Product Name & Brand) */}
+                                                    <div
+                                                        onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                                        className={`flex items-center justify-between px-3 py-2 text-xs font-bold cursor-pointer transition-colors select-none ${
+                                                            isCollapsed
+                                                                ? 'bg-gray-50/90 dark:bg-[#11141f] hover:bg-gray-100 dark:hover:bg-[#191e2d] text-gray-800 dark:text-slate-200'
+                                                                : 'bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-slate-100 border-b border-gray-100 dark:border-slate-800/80'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                                                className="p-0.5 rounded text-gray-400 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                                                                title={isCollapsed ? 'Open (Expand)' : 'Close (Collapse)'}
+                                                            >
+                                                                {isCollapsed ? (
+                                                                    <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                                                                ) : (
+                                                                    <ChevronDownIcon className="w-3.5 h-3.5 stroke-[2.5] text-emerald-600 dark:text-emerald-400" />
+                                                                )}
+                                                            </button>
+
+                                                            <span
+                                                                className="font-extrabold text-gray-900 dark:text-white tracking-tight truncate cursor-pointer"
+                                                                title={grp.displayName}
+                                                            >
+                                                                {grp.displayName}
+                                                            </span>
+
+                                                            <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-emerald-100 dark:bg-emerald-900/50 text-[#0F4C3A] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                                                                {grp.variants.length} {grp.variants.length === 1 ? 'Weight' : 'Weights'}
+                                                            </span>
+
+                                                            {anyInCart && (
+                                                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-600 text-white shrink-0">
+                                                                    ✓ In Cart
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-semibold text-gray-500 dark:text-slate-400">
+                                                            <span>
+                                                                Stock:{' '}
+                                                                <span className={grp.totalStock <= 0 ? 'text-red-500 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
+                                                                    {grp.totalStock}
+                                                                </span>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Child Weight Variants */}
+                                                    {!isCollapsed && (
+                                                        <div className="divide-y divide-gray-100 dark:divide-slate-800/80 bg-white dark:bg-[#141824]">
+                                                            {grp.variants.map((v, vIdx) => {
+                                                                const isLast = vIdx === grp.variants.length - 1;
+                                                                const inCart = isInCart(v.id);
+                                                                const stock = Number(v.total_stock ?? v.stock ?? 0);
+                                                                const price = Number(v.selling_price || v.sellingPrice || 0);
+                                                                const isHighlighted = highlightedSearchIndex >= 0 && filteredProducts[highlightedSearchIndex]?.id === v.id;
+
+                                                                return (
+                                                                    <div
+                                                                        key={v.id}
+                                                                        title={`${grp.displayName} (${v.measurement_value || v.unit || 'Standard'}) - Stock: ${stock}, Price: ₹${price.toFixed(2)}`}
+                                                                        onClick={() =>
+                                                                            inCart
+                                                                                ? handleRemoveItem(
+                                                                                      items.findIndex((i) => i.productId === v.id)
+                                                                                  )
+                                                                                : handleAddProduct(v)
+                                                                        }
+                                                                        className={`flex items-center justify-between px-2.5 py-1.5 pl-3.5 text-xs cursor-pointer transition-colors ${
+                                                                            isHighlighted
+                                                                                ? 'bg-emerald-100/90 dark:bg-emerald-900/60 ring-2 ring-emerald-500 z-10'
+                                                                                : inCart
+                                                                                ? 'bg-emerald-50/70 dark:bg-emerald-950/50 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/60'
+                                                                                : 'hover:bg-gray-50 dark:hover:bg-[#1c2233]'
+                                                                        }`}
+                                                                    >
+                                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                                            <span className="font-mono text-xs select-none text-gray-300 dark:text-slate-600 shrink-0">
+                                                                                {grp.variants.length > 1 ? (isLast ? '└──' : '├──') : '└──'}
+                                                                            </span>
+
+                                                                            {/* Weight Badge */}
+                                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/70 shrink-0 whitespace-nowrap">
+                                                                                Weight: <strong>{v.measurement_value || v.unit || 'Standard'}</strong>
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {/* Right side: Stock Quantity (replacing + Add button) */}
+                                                                        <div className="flex-shrink-0 flex items-center gap-1.5 ml-2 text-[10px] font-semibold text-gray-500 dark:text-slate-400">
+                                                                            {inCart && (
+                                                                                <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 shrink-0">
+                                                                                    ✓ In Cart
+                                                                                </span>
+                                                                            )}
+                                                                            <span>
+                                                                                Stock:{' '}
+                                                                                <span className={stock <= 0 ? 'text-red-500 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
+                                                                                    {stock}
+                                                                                </span>
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     )}
                                                 </div>
-                                            </div>
-                                        );
-                                    })
+                                            );
+                                        })}
+                                    </>
                                 )}
                             </div>
                         )}
@@ -1055,25 +1175,12 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         <label className="text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
                             Select Profile
                         </label>
-                        <div className="flex gap-2">
-                            <div
-                                onClick={() => setShowCustomerDropdown(!showCustomerDropdown)}
-                                className="flex-1 flex justify-between items-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-700 dark:text-slate-200 cursor-pointer hover:border-[#0F4C3A] dark:hover:border-emerald-500 transition-colors"
-                            >
-                                <span className="truncate">{customerName || 'Select Customer...'}</span>
-                                <ChevronDownIcon className="w-4 h-4 text-gray-400 dark:text-slate-500" />
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setNewCustType(customerType);
-                                    setShowAddCustomerModal(true);
-                                }}
-                                className="px-3 bg-[#0F4C3A] hover:bg-[#1a6b4f] text-white border border-[#0F4C3A] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30"
-                                title="Register New Customer (Ctrl + N)"
-                            >
-                                <UserPlusIcon className="w-4 h-4" /> Add <span className="text-[9px] font-mono opacity-80 bg-black/20 px-1 py-0.5 rounded">Ctrl+N</span>
-                            </button>
+                        <div
+                            onClick={() => setShowCustomerDropdown(!showCustomerDropdown)}
+                            className="w-full flex justify-between items-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-700 dark:text-slate-200 cursor-pointer hover:border-[#0F4C3A] dark:hover:border-emerald-500 transition-colors"
+                        >
+                            <span className="truncate">{customerName || 'Select Customer...'}</span>
+                            <ChevronDownIcon className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                         </div>
 
                         {showCustomerDropdown && (
@@ -1228,10 +1335,15 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                             >
                                                 <td className="px-4 py-3">
                                                     <p className="text-xs font-bold text-gray-800 dark:text-slate-100 truncate max-w-[220px]">
-                                                        {item.name}
+                                                        {item.name} {item.brand ? `(${item.brand})` : ''}
                                                     </p>
                                                     <div className="flex items-center gap-1.5 text-[9px] font-mono text-gray-400 dark:text-slate-500">
                                                         <span>{item.barcode || '—'}</span>
+                                                        {item.measurement_value && (
+                                                            <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-1 py-0.2 rounded border border-amber-200 dark:border-amber-800">
+                                                                {item.measurement_value}
+                                                            </span>
+                                                        )}
                                                         <span className="font-semibold text-emerald-600 dark:text-emerald-400">({item.unit || 'Pcs'})</span>
                                                         {item.selectedUnit && item.selectedUnit !== item.unit && (
                                                             <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 py-0.5 rounded">
@@ -1734,161 +1846,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 </div>
             </div>
 
-            {/* ─── ADD CUSTOMER MODAL ─── */}
-            <AnimatePresence>
-                {showAddCustomerModal && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-black/30 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-[99999] p-4"
-                    >
-                        <motion.div
-                            initial={{ scale: 0.95, y: 10 }}
-                            animate={{ scale: 1, y: 0 }}
-                            exit={{ scale: 0.95, y: 10 }}
-                            className="bg-white dark:bg-[#141825] border border-gray-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-xl dark:shadow-2xl dark:shadow-black/60 relative font-sans text-xs"
-                        >
-                            <button
-                                onClick={() => setShowAddCustomerModal(false)}
-                                className="absolute right-4 top-4 text-gray-400 dark:text-slate-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer"
-                            >
-                                <XMarkIcon className="w-5 h-5" />
-                            </button>
-
-                            <div>
-                                <h2 className="text-sm font-bold text-gray-800 dark:text-slate-100 flex items-center gap-2 uppercase tracking-wide">
-                                    <UserPlusIcon className="w-5 h-5 text-[#0F4C3A] dark:text-emerald-400" /> Register Customer
-                                </h2>
-                                <p className="text-[10px] text-gray-500 dark:text-slate-400 font-medium mt-0.5">
-                                    Creates a new customer profile in the ledger
-                                </p>
-                            </div>
-
-                            <form onSubmit={handleAddNewCustomerSubmit} className="space-y-3">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Customer Type
-                                    </label>
-                                    <div className="grid grid-cols-2 gap-1 p-1 bg-gray-100 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 rounded-xl">
-                                        <button
-                                            type="button"
-                                            onClick={() => setNewCustType('Walk-in')}
-                                            className={`py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                                newCustType === 'Walk-in'
-                                                    ? 'bg-[#0F4C3A] text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30'
-                                                    : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
-                                            }`}
-                                        >
-                                            Walk-in
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setNewCustType('Borrow')}
-                                            className={`py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                                newCustType === 'Borrow'
-                                                    ? 'bg-[#0F4C3A] text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30'
-                                                    : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
-                                            }`}
-                                        >
-                                            Borrow
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Full Name *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={newCustName}
-                                        onChange={(e) => setNewCustName(e.target.value)}
-                                        placeholder="Name"
-                                        className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Mobile Number *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={newCustPhone}
-                                        onChange={(e) => setNewCustPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                                        maxLength={10}
-                                        placeholder="Mobile Number"
-                                        className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors font-mono"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Address
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={newCustAddress}
-                                        onChange={(e) => setNewCustAddress(e.target.value)}
-                                        placeholder="Address"
-                                        className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Payment Mode
-                                    </label>
-                                    <select
-                                        value={newCustPaymentMode}
-                                        onChange={(e) => setNewCustPaymentMode(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors"
-                                    >
-                                        <option value="Cash">Cash</option>
-                                        <option value="UPI">UPI</option>
-                                        <option value="Card">Card</option>
-                                        <option value="Bank Transfer">Bank Transfer</option>
-                                        <option value="Credit/Borrow">Credit/Borrow</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
-                                        Notes (optional)
-                                    </label>
-                                    <textarea
-                                        rows="2"
-                                        value={newCustNotes}
-                                        onChange={(e) => setNewCustNotes(e.target.value)}
-                                        placeholder="Additional notes..."
-                                        className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors resize-none"
-                                    />
-                                </div>
-
-                                <div className="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-slate-800">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowAddCustomerModal(false)}
-                                        className="px-4 py-2 bg-gray-100 dark:bg-[#0d101a] hover:bg-gray-200 dark:hover:bg-slate-800/60 text-gray-600 dark:text-slate-400 hover:text-gray-800 dark:hover:text-white font-bold rounded-xl cursor-pointer border border-gray-200 dark:border-slate-800 transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 bg-[#0F4C3A] hover:bg-[#1a6b4f] text-white font-bold rounded-xl cursor-pointer shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30 transition-all"
-                                    >
-                                        Save Profile
-                                    </button>
-                                </div>
-                            </form>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
             {/* ─── KEYBOARD SHORTCUTS HELP MODAL (Alt + /) ─── */}
             <AnimatePresence>
                 {showShortcutsHelpModal && (
@@ -2012,10 +1969,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     </h3>
                                     <div className="space-y-2">
                                         <div className="flex justify-between items-center">
-                                            <span className="text-slate-600 dark:text-slate-300 font-medium">Register New Customer</span>
-                                            <kbd className="px-2 py-1 bg-white dark:bg-[#1a2030] border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-slate-800 dark:text-slate-200">Ctrl + N</kbd>
-                                        </div>
-                                        <div className="flex justify-between items-center">
                                             <span className="text-slate-600 dark:text-slate-300 font-medium">Close Active Dialog</span>
                                             <kbd className="px-2 py-1 bg-white dark:bg-[#1a2030] border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-slate-800 dark:text-slate-200">Esc</kbd>
                                         </div>
@@ -2077,7 +2030,9 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         <tbody>
                             {items.map((item, idx) => (
                                 <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                    <td style={{ padding: '8px 10px' }}>{item.name}</td>
+                                    <td style={{ padding: '8px 10px' }}>
+                                        {item.name} {item.brand ? `(${item.brand})` : ''} {item.measurement_value ? `[${item.measurement_value}]` : ''}
+                                    </td>
                                     <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                                         {item.quantity}
                                     </td>
@@ -2160,7 +2115,7 @@ const selectedCustomerCard = (customerId, list) => {
     if (!match) {
         return (
             <div className="bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 p-3 rounded-xl text-[11px] text-gray-400 dark:text-slate-500 font-medium italic text-center">
-                No borrow profile selected. Search or add one.
+                No borrow profile selected. Search from existing customers or register in Borrow Ledger.
             </div>
         );
     }

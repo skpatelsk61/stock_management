@@ -5,23 +5,41 @@ import { logActivity } from '../utils/activityLogger.js';
 // @access  Private
 export const getBrands = async (req, res, next) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, category_id, sub_category_id } = req.query;
 
-    let queryStr = 'SELECT * FROM brands WHERE 1=1';
+    let queryStr = `
+      SELECT b.*, 
+             c.name as category_name,
+             sc.name as sub_category_name
+      FROM brands b
+      LEFT JOIN categories c ON b.category_id = c.id
+      LEFT JOIN sub_categories sc ON b.sub_category_id = sc.id
+      WHERE 1=1
+    `;
     const params = [];
 
+    if (category_id) {
+      queryStr += ' AND b.category_id = ?';
+      params.push(Number(category_id));
+    }
+
+    if (sub_category_id) {
+      queryStr += ' AND b.sub_category_id = ?';
+      params.push(Number(sub_category_id));
+    }
+
     if (status) {
-      queryStr += ' AND status = ?';
+      queryStr += ' AND b.status = ?';
       params.push(status);
     }
 
     if (search) {
-      queryStr += ' AND (name LIKE ? OR description LIKE ?)';
+      queryStr += ' AND (b.name LIKE ? OR c.name LIKE ? OR sc.name LIKE ? OR b.description LIKE ?)';
       const s = `%${search.trim()}%`;
-      params.push(s, s);
+      params.push(s, s, s, s);
     }
 
-    queryStr += ' ORDER BY name ASC';
+    queryStr += ' ORDER BY c.name ASC, sc.name ASC, b.name ASC';
 
     const [brands] = await req.db.query(queryStr, params);
 
@@ -40,34 +58,56 @@ export const getBrands = async (req, res, next) => {
 // @access  Private
 export const createBrand = async (req, res, next) => {
   try {
-    const { name, description, status } = req.body;
+    const { name, category_id, sub_category_id, description, status } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: 'Brand Name is required' });
     }
 
-    // Duplicate check
+    if (!category_id) {
+      return res.status(400).json({ success: false, message: 'Parent Main Category is required' });
+    }
+
+    if (!sub_category_id) {
+      return res.status(400).json({ success: false, message: 'Parent Sub Category is required' });
+    }
+
+    const catIdNum = Number(category_id);
+    const subCatIdNum = Number(sub_category_id);
+
+    // Verify Main Category and Subcategory exist
+    const [parentCat] = await req.db.query('SELECT id, name FROM categories WHERE id = ?', [catIdNum]);
+    if (parentCat.length === 0) {
+      return res.status(404).json({ success: false, message: 'Selected Parent Category does not exist' });
+    }
+
+    const [parentSub] = await req.db.query('SELECT id, name FROM sub_categories WHERE id = ?', [subCatIdNum]);
+    if (parentSub.length === 0) {
+      return res.status(404).json({ success: false, message: 'Selected Sub Category does not exist' });
+    }
+
+    // Duplicate check under same category and subcategory
     const [existing] = await req.db.query(
-      'SELECT id FROM brands WHERE name = ?',
-      [name.trim()]
+      'SELECT id FROM brands WHERE name = ? AND category_id = ? AND sub_category_id = ?',
+      [name.trim(), catIdNum, subCatIdNum]
     );
 
     if (existing.length > 0) {
       return res.status(400).json({
         success: false,
-        message: `A Brand named "${name.trim()}" already exists.`
+        message: `A Brand named "${name.trim()}" already exists under subcategory "${parentSub[0].name}".`
       });
     }
 
     const statusVal = status || 'Active';
 
     const [result] = await req.db.query(
-      `INSERT INTO brands (name, description, status) VALUES (?, ?, ?)`,
-      [name.trim(), description ? description.trim() : null, statusVal]
+      `INSERT INTO brands (name, category_id, sub_category_id, description, status) VALUES (?, ?, ?, ?, ?)`,
+      [name.trim(), catIdNum, subCatIdNum, description ? description.trim() : null, statusVal]
     );
 
     await logActivity(req.user.id, 'Create Brand', 'Brands',
-      `Created Brand "${name.trim()}" (ID: ${result.insertId})`, req.ip);
+      `Created Brand "${name.trim()}" under "${parentCat[0].name} > ${parentSub[0].name}" (ID: ${result.insertId})`, req.ip);
 
     return res.status(201).json({
       success: true,
@@ -75,6 +115,10 @@ export const createBrand = async (req, res, next) => {
       brand: {
         id: result.insertId,
         name: name.trim(),
+        category_id: catIdNum,
+        category_name: parentCat[0].name,
+        sub_category_id: subCatIdNum,
+        sub_category_name: parentSub[0].name,
         description: description ? description.trim() : null,
         status: statusVal
       }
@@ -90,7 +134,7 @@ export const createBrand = async (req, res, next) => {
 export const updateBrand = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, description, status } = req.body;
+    const { name, category_id, sub_category_id, description, status } = req.body;
 
     const [existing] = await req.db.query('SELECT * FROM brands WHERE id = ?', [id]);
     if (existing.length === 0) {
@@ -98,32 +142,56 @@ export const updateBrand = async (req, res, next) => {
     }
 
     const targetName = name !== undefined ? name.trim() : existing[0].name;
+    const targetCatId = category_id !== undefined ? (category_id ? Number(category_id) : null) : existing[0].category_id;
+    const targetSubCatId = sub_category_id !== undefined ? (sub_category_id ? Number(sub_category_id) : null) : existing[0].sub_category_id;
 
-    // Duplicate check excluding self
-    if (name) {
+    // Verify Category & Subcategory if provided
+    if (category_id) {
+      const [parentCat] = await req.db.query('SELECT id FROM categories WHERE id = ?', [targetCatId]);
+      if (parentCat.length === 0) {
+        return res.status(404).json({ success: false, message: 'Selected Parent Category does not exist' });
+      }
+    }
+
+    if (sub_category_id) {
+      const [parentSub] = await req.db.query('SELECT id FROM sub_categories WHERE id = ?', [targetSubCatId]);
+      if (parentSub.length === 0) {
+        return res.status(404).json({ success: false, message: 'Selected Sub Category does not exist' });
+      }
+    }
+
+    // Duplicate check excluding self under same category and subcategory
+    if (targetName && targetCatId && targetSubCatId) {
       const [dupCheck] = await req.db.query(
-        'SELECT id FROM brands WHERE name = ? AND id != ?',
-        [targetName, id]
+        'SELECT id FROM brands WHERE name = ? AND category_id = ? AND sub_category_id = ? AND id != ?',
+        [targetName, targetCatId, targetSubCatId, id]
       );
       if (dupCheck.length > 0) {
         return res.status(400).json({
           success: false,
-          message: `A Brand named "${targetName}" already exists.`
+          message: `A Brand named "${targetName}" already exists under this Sub Category.`
         });
       }
     }
 
     await req.db.query(
       `UPDATE brands 
-       SET name = ?, description = ?, status = ?
+       SET name = ?, category_id = ?, sub_category_id = ?, description = ?, status = ?
        WHERE id = ?`,
       [
         targetName,
+        targetCatId,
+        targetSubCatId,
         description !== undefined ? (description ? description.trim() : null) : existing[0].description,
         status || existing[0].status,
         id
       ]
     );
+
+    // Sync products table if both category and subcategory are set
+    if (targetCatId && targetSubCatId) {
+      await req.db.query('UPDATE products SET category_id = ?, sub_category_id = ? WHERE brand_id = ?', [targetCatId, targetSubCatId, id]);
+    }
 
     await logActivity(req.user.id, 'Update Brand', 'Brands',
       `Updated Brand ID: ${id} to "${targetName}"`, req.ip);

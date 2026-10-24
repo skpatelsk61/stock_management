@@ -9,8 +9,7 @@ import {
   Squares2X2Icon,
   BuildingStorefrontIcon,
   XMarkIcon,
-  CheckCircleIcon,
-  ArrowPathRoundedSquareIcon
+  CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import StatusBadge from '../../components/common/StatusBadge';
 import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
@@ -48,6 +47,7 @@ const CategoryList = () => {
   const [formData, setFormData] = useState({
     name: '',
     category_id: '',
+    sub_category_id: '',
     description: '',
     status: 'Active'
   });
@@ -68,8 +68,14 @@ const CategoryList = () => {
         if (subRes.success) setSubCategories(subRes.subCategories || []);
         if (catRes.success) setCategories(catRes.categories || []);
       } else if (activeTab === 'brand') {
-        const res = await brandsAPI.getAll({ search: searchQuery, status: statusFilter });
-        if (res.success) setBrands(res.brands || []);
+        const [brandRes, catRes, subRes] = await Promise.all([
+          brandsAPI.getAll({ search: searchQuery, status: statusFilter }),
+          categoriesAPI.getAll({ status: 'Active' }),
+          subCategoriesAPI.getAll({ status: 'Active' })
+        ]);
+        if (brandRes.success) setBrands(brandRes.brands || []);
+        if (catRes.success) setCategories(catRes.categories || []);
+        if (subRes.success) setSubCategories(subRes.subCategories || []);
       }
     } catch (err) {
       console.error('Failed to load master records:', err);
@@ -81,18 +87,34 @@ const CategoryList = () => {
 
   useEffect(() => {
     loadData();
-    const handleEventUpdate = () => {
-      loadData();
+
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadData();
+      }, 350);
     };
-    window.addEventListener('focus', handleEventUpdate);
-    window.addEventListener('category-updated', handleEventUpdate);
-    window.addEventListener('brand-updated', handleEventUpdate);
-    window.addEventListener('inventory-updated', handleEventUpdate);
+
+    const handleFocusSync = () => {
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        loadData();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    window.addEventListener('category-updated', handleDebouncedUpdate);
+    window.addEventListener('brand-updated', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
     return () => {
-      window.removeEventListener('focus', handleEventUpdate);
-      window.removeEventListener('category-updated', handleEventUpdate);
-      window.removeEventListener('brand-updated', handleEventUpdate);
-      window.removeEventListener('inventory-updated', handleEventUpdate);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocusSync);
+      window.removeEventListener('category-updated', handleDebouncedUpdate);
+      window.removeEventListener('brand-updated', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
     };
   }, [activeTab, searchQuery, statusFilter]);
 
@@ -100,9 +122,11 @@ const CategoryList = () => {
   const handleOpenAddModal = () => {
     setModalMode('add');
     setEditId(null);
+    const initialCatId = categories.length > 0 ? categories[0].id : '';
     setFormData({
       name: '',
-      category_id: categories.length > 0 ? categories[0].id : '',
+      category_id: activeTab === 'main' ? '' : initialCatId,
+      sub_category_id: '',
       description: '',
       status: 'Active'
     });
@@ -117,6 +141,7 @@ const CategoryList = () => {
     setFormData({
       name: item.name || '',
       category_id: item.category_id || (categories.length > 0 ? categories[0].id : ''),
+      sub_category_id: item.sub_category_id || '',
       description: item.description || '',
       status: item.status || 'Active'
     });
@@ -146,6 +171,16 @@ const CategoryList = () => {
     if (activeTab === 'sub' && !formData.category_id) {
       setError('Parent Main Category is required.');
       return;
+    }
+    if (activeTab === 'brand') {
+      if (!formData.category_id) {
+        setError('Parent Main Category is required.');
+        return;
+      }
+      if (!formData.sub_category_id) {
+        setError('Parent Sub Category is required.');
+        return;
+      }
     }
 
     setBtnLoading(true);
@@ -190,6 +225,8 @@ const CategoryList = () => {
         if (modalMode === 'add') {
           const res = await brandsAPI.create({
             name: formData.name.trim(),
+            category_id: formData.category_id,
+            sub_category_id: formData.sub_category_id,
             description: formData.description,
             status: formData.status
           });
@@ -197,6 +234,8 @@ const CategoryList = () => {
         } else {
           const res = await brandsAPI.update(editId, {
             name: formData.name.trim(),
+            category_id: formData.category_id,
+            sub_category_id: formData.sub_category_id,
             description: formData.description,
             status: formData.status
           });
@@ -369,15 +408,21 @@ const CategoryList = () => {
                   {activeTab === 'brand' && 'Brand Name'}
                 </th>
                 {activeTab === 'sub' && <th className="py-3 px-4">Parent Category</th>}
+                {activeTab === 'brand' && (
+                  <>
+                    <th className="py-3 px-4">Main Category</th>
+                    <th className="py-3 px-4">Sub Category</th>
+                  </>
+                )}
                 <th className="py-3 px-4">Description</th>
                 <th className="py-3 px-4 w-32">Status</th>
-                <th className="py-3 px-4 text-right w-36">Actions</th>
+                <th className="py-3 px-4 text-right w-28">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan={activeTab === 'sub' ? 6 : 5} className="py-12 text-center text-slate-400 font-semibold animate-pulse">
+                  <td colSpan={activeTab === 'brand' ? 7 : activeTab === 'sub' ? 6 : 5} className="py-12 text-center text-slate-400 font-semibold animate-pulse">
                     Loading {activeTab} master records...
                   </td>
                 </tr>
@@ -389,7 +434,7 @@ const CategoryList = () => {
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">{cat.name}</td>
                       <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{cat.description || '—'}</td>
                       <td className="py-3 px-4"><StatusBadge status={cat.status} /></td>
-                      <td className="py-3 px-4 text-right space-x-2">
+                      <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => handleOpenEditModal(cat)}
                           title="Edit Details"
@@ -397,19 +442,6 @@ const CategoryList = () => {
                         >
                           <PencilSquareIcon className="w-3.5 h-3.5" />
                           <span>Edit</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleToggleStatus(cat.id, cat.status, cat.name)}
-                          title="Toggle Active/Inactive"
-                          className={`px-2.5 py-1 rounded-lg border font-bold inline-flex items-center gap-1 transition-all ${
-                            cat.status === 'Active'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                          }`}
-                        >
-                          <ArrowPathRoundedSquareIcon className="w-3.5 h-3.5" />
-                          <span>{cat.status === 'Active' ? 'Deactivate' : 'Activate'}</span>
                         </button>
                       </td>
                     </tr>
@@ -428,7 +460,7 @@ const CategoryList = () => {
                       <td className="py-3 px-4 font-bold text-indigo-600 dark:text-indigo-400">{sub.category_name}</td>
                       <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{sub.description || '—'}</td>
                       <td className="py-3 px-4"><StatusBadge status={sub.status} /></td>
-                      <td className="py-3 px-4 text-right space-x-2">
+                      <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => handleOpenEditModal(sub)}
                           title="Edit Details"
@@ -436,19 +468,6 @@ const CategoryList = () => {
                         >
                           <PencilSquareIcon className="w-3.5 h-3.5" />
                           <span>Edit</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleToggleStatus(sub.id, sub.status, sub.name)}
-                          title="Toggle Active/Inactive"
-                          className={`px-2.5 py-1 rounded-lg border font-bold inline-flex items-center gap-1 transition-all ${
-                            sub.status === 'Active'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                          }`}
-                        >
-                          <ArrowPathRoundedSquareIcon className="w-3.5 h-3.5" />
-                          <span>{sub.status === 'Active' ? 'Deactivate' : 'Activate'}</span>
                         </button>
                       </td>
                     </tr>
@@ -464,9 +483,11 @@ const CategoryList = () => {
                     <tr key={b.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="py-3 px-4 font-bold text-slate-400">{idx + 1}</td>
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">{b.name}</td>
+                      <td className="py-3 px-4 font-bold text-indigo-600 dark:text-indigo-400">{b.category_name || '—'}</td>
+                      <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">{b.sub_category_name || '—'}</td>
                       <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{b.description || '—'}</td>
                       <td className="py-3 px-4"><StatusBadge status={b.status} /></td>
-                      <td className="py-3 px-4 text-right space-x-2">
+                      <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => handleOpenEditModal(b)}
                           title="Edit Details"
@@ -475,25 +496,12 @@ const CategoryList = () => {
                           <PencilSquareIcon className="w-3.5 h-3.5" />
                           <span>Edit</span>
                         </button>
-
-                        <button
-                          onClick={() => handleToggleStatus(b.id, b.status, b.name)}
-                          title="Toggle Active/Inactive"
-                          className={`px-2.5 py-1 rounded-lg border font-bold inline-flex items-center gap-1 transition-all ${
-                            b.status === 'Active'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                          }`}
-                        >
-                          <ArrowPathRoundedSquareIcon className="w-3.5 h-3.5" />
-                          <span>{b.status === 'Active' ? 'Deactivate' : 'Activate'}</span>
-                        </button>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="5" className="py-12 text-center text-slate-400 font-semibold">No Brands found. Click "Add Brand" to create one.</td>
+                    <td colSpan="7" className="py-12 text-center text-slate-400 font-semibold">No Brands found. Click "Add Brand" to create one.</td>
                   </tr>
                 )
               )}
@@ -528,6 +536,74 @@ const CategoryList = () => {
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Parent Category Field (For Sub Category) */}
+              {activeTab === 'sub' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                    Parent Category <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={formData.category_id}
+                    onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="">Select Active Parent Category</option>
+                    {categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Main Category & Sub Category Fields (For Brand) */}
+              {activeTab === 'brand' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                      Main Category <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={formData.category_id}
+                      onChange={(e) => setFormData({ ...formData, category_id: e.target.value, sub_category_id: '' })}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    >
+                      <option value="">Select Main Category</option>
+                      {categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                      Sub Category <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      required
+                      disabled={!formData.category_id}
+                      value={formData.sub_category_id}
+                      onChange={(e) => setFormData({ ...formData, sub_category_id: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
+                    >
+                      {!formData.category_id ? (
+                        <option value="">Select Main Category First</option>
+                      ) : subCategories.filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id))).length === 0 ? (
+                        <option value="" disabled>No Sub Categories Available</option>
+                      ) : (
+                        <option value="">Select Sub Category</option>
+                      )}
+                      {subCategories
+                        .filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id)))
+                        .map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
               {/* Name Field */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
@@ -545,40 +621,22 @@ const CategoryList = () => {
                 />
               </div>
 
-              {/* Parent Category Field (Only for Sub Category) */}
-              {activeTab === 'sub' && (
+              {/* Status Field (Only shown in Edit mode) */}
+              {modalMode === 'edit' && (
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                    Parent Category <span className="text-rose-500">*</span>
+                    Status
                   </label>
                   <select
-                    required
-                    value={formData.category_id}
-                    onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                   >
-                    <option value="">Select Active Parent Category</option>
-                    {categories.filter(c => c.status === 'Active').map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
                   </select>
                 </div>
               )}
-
-              {/* Status Field */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                  Status
-                </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
 
               {/* Description Field */}
               <div>
