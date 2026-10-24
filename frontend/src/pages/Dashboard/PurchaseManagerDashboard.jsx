@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
+  LineChart,
+  Line,
   BarChart,
   Bar,
   XAxis,
@@ -234,14 +236,14 @@ const PurchaseManagerDashboard = () => {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={purchaseTrend}>
+                <LineChart data={purchaseTrend}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                   <XAxis dataKey="day" stroke="#94a3b8" />
                   <YAxis stroke="#94a3b8" />
                   <Tooltip />
-                  <Bar dataKey="Purchases" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="GRN" fill="#0d9488" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <Line type="monotone" dataKey="Purchases" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="GRN" stroke="#0d9488" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </LineChart>
               </ResponsiveContainer>
             )}
           </div>

@@ -1178,6 +1178,145 @@ export const getPurchaseById = async (req, res, next) => {
     purchase.store_gstin = storeInfo.gstin;
     purchase.store_logo = storeInfo.logo_url;
 
+    // Fetch all linked shipments / GRN deliveries (via purchase_order_id or direct grn_id)
+    let grnList = [];
+    if (purchase.purchase_order_id) {
+      const [poGrns] = await req.db.query(
+        'SELECT id, grn_no, purchase_order_id, vendor_id, warehouse_id, date, notes, created_at FROM grns WHERE purchase_order_id = ? ORDER BY date ASC, id ASC',
+        [purchase.purchase_order_id]
+      );
+      grnList = poGrns;
+    } else if (purchase.grn_id) {
+      const [singleGrn] = await req.db.query(
+        'SELECT id, grn_no, purchase_order_id, vendor_id, warehouse_id, date, notes, created_at FROM grns WHERE id = ? ORDER BY date ASC, id ASC',
+        [purchase.grn_id]
+      );
+      grnList = singleGrn;
+    }
+
+    const shipments = [];
+    for (let sIdx = 0; sIdx < grnList.length; sIdx++) {
+      const g = grnList[sIdx];
+      const [gItems] = await req.db.query(`
+        SELECT gi.*, pr.name as product_name, pr.unit, pr.barcode, pr.sku
+        FROM grn_items gi
+        JOIN products pr ON gi.product_id = pr.id
+        WHERE gi.grn_id = ?
+      `, [g.id]);
+
+      let shipReceived = 0;
+      let shipDamaged = 0;
+      let shipRejected = 0;
+      let shipAccepted = 0;
+      let shipSubtotal = 0;
+      let shipGst = 0;
+      let shipTotal = 0;
+      let shipDamagedVal = 0;
+      const itemsDetail = [];
+
+      for (const it of gItems) {
+        const qRec = Number(it.quantity_received || 0);
+        const qDam = Number(it.quantity_damaged || 0);
+        const qRej = Number(it.quantity_rejected || 0);
+        const netAcc = Math.max(0, qRec - qDam - qRej);
+
+        const matchItem = items.find(pi => Number(pi.product_id) === Number(it.product_id));
+        const unitPrice = matchItem ? Number(matchItem.purchase_price || 0) : (it.purchase_price ? Number(it.purchase_price) : 0);
+        const unitGst = matchItem ? Number(matchItem.gst || 0) : 0;
+
+        const lineSub = Number((netAcc * unitPrice).toFixed(2));
+        const lineTax = Number(((lineSub * unitGst) / 100).toFixed(2));
+        const lineTot = Number((lineSub + lineTax).toFixed(2));
+        const damVal = Number(((qDam * unitPrice) * (1 + unitGst / 100)).toFixed(2));
+
+        shipReceived += qRec;
+        shipDamaged += qDam;
+        shipRejected += qRej;
+        shipAccepted += netAcc;
+        shipSubtotal += lineSub;
+        shipGst += lineTax;
+        shipTotal += lineTot;
+        shipDamagedVal += damVal;
+
+        itemsDetail.push({
+          product_id: it.product_id,
+          product_name: it.product_name,
+          unit: it.unit,
+          barcode: it.barcode,
+          quantity_received: qRec,
+          quantity_damaged: qDam,
+          quantity_rejected: qRej,
+          net_accepted: netAcc,
+          unit_price: unitPrice,
+          gst: unitGst,
+          total: lineTot,
+          batch_number: it.batch_number,
+          mrp: it.mrp,
+          selling_price: it.selling_price
+        });
+      }
+
+      shipments.push({
+        id: g.id,
+        installment_no: sIdx + 1,
+        grn_no: g.grn_no,
+        date: g.date,
+        created_at: g.created_at,
+        notes: g.notes,
+        total_received: shipReceived,
+        total_damaged: shipDamaged,
+        total_rejected: shipRejected,
+        total_accepted: shipAccepted,
+        subtotal: Number(shipSubtotal.toFixed(2)),
+        gst_amount: Number(shipGst.toFixed(2)),
+        amount: Number(shipTotal.toFixed(2)),
+        damaged_value: Number(shipDamagedVal.toFixed(2)),
+        items: itemsDetail
+      });
+    }
+
+    purchase.shipments = shipments;
+
+    // Fetch supplier payments / installment history
+    const [payments] = await req.db.query(`
+      SELECT sp.id, sp.payment_no, sp.payment_date, sp.amount, sp.payment_mode, sp.reference_no, sp.remarks, sp.created_at
+      FROM supplier_payments sp
+      WHERE sp.purchase_id = ?
+         OR sp.id IN (SELECT payment_id FROM vendor_ledger WHERE purchase_id = ? AND payment_id IS NOT NULL)
+         OR (sp.reference_no = ? AND sp.reference_no IS NOT NULL AND sp.reference_no != '')
+      ORDER BY sp.payment_date ASC, sp.id ASC
+    `, [id, id, purchase.purchase_no]);
+
+    if (payments.length > 0) {
+      purchase.payments = payments.map((p, idx) => ({
+        installment_no: idx + 1,
+        id: p.id,
+        payment_no: p.payment_no,
+        payment_date: p.payment_date,
+        amount: Number(p.amount || 0),
+        payment_mode: p.payment_mode || 'Cash',
+        reference_no: p.reference_no,
+        remarks: p.remarks,
+        created_at: p.created_at
+      }));
+    } else if (Number(purchase.paid_amount || 0) > 0) {
+      purchase.payments = [
+        {
+          installment_no: 1,
+          id: 'pay-init',
+          payment_no: 'DIRECT-PAY',
+          payment_date: purchase.date,
+          amount: Number(purchase.paid_amount || 0),
+          payment_mode: purchase.payment_method || 'Cash',
+          reference_no: purchase.purchase_no,
+          remarks: 'Settled at purchase invoice creation',
+          created_at: purchase.created_at
+        }
+      ];
+    } else {
+      purchase.payments = [];
+    }
+
     return res.status(200).json({ success: true, purchase, store: storeInfo });
   } catch (error) {
     next(error);
@@ -1343,6 +1482,17 @@ export const createPurchase = async (req, res, next) => {
         [purchaseId, targetProductId, itemQty, itemPurchasePrice, itemMrp, itemGst, itemTotal]
       );
 
+      // If linked to a purchase order and stock was not already inwarded by a GRN, update PO items delivered/received quantities
+      if (purchase_order_id && !stockAlreadyAdded) {
+        await connection.query(
+          `UPDATE purchase_order_items 
+           SET delivered_quantity = COALESCE(delivered_quantity, 0) + ?,
+               received_quantity = COALESCE(received_quantity, 0) + ?
+           WHERE purchase_order_id = ? AND product_id = ?`,
+          [itemQty, itemQty, purchase_order_id, targetProductId]
+        );
+      }
+
       if (!stockAlreadyAdded) {
         let resolvedBatchNo = item.batch_number || item.batch_no;
         if (!resolvedBatchNo || String(resolvedBatchNo).trim() === '' || String(resolvedBatchNo).startsWith('BATCH-')) {
@@ -1426,6 +1576,18 @@ export const createPurchase = async (req, res, next) => {
         // Sync FIFO active batch Expiry Date and MRP on Product master
         await syncProductFifoState(connection, targetProductId);
       }
+    }
+
+    // Auto-sync purchase order status if linked to a purchase order
+    if (purchase_order_id) {
+      const [updatedPOItems] = await connection.query(
+        'SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
+        [purchase_order_id]
+      );
+      const allReceived = updatedPOItems.length > 0 && updatedPOItems.every(it => Number(it.received_quantity || 0) >= Number(it.quantity || 0));
+      const anyReceived = updatedPOItems.some(it => Number(it.received_quantity || 0) > 0);
+      const autoStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
+      await connection.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [autoStatus, purchase_order_id]);
     }
 
     // Fetch current vendor totals & check existing advance balance BEFORE this purchase
@@ -1646,7 +1808,23 @@ export const getPurchaseOrders = async (req, res, next) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = `
-      SELECT po.*, v.name as vendor_name, w.name as warehouse_name
+      SELECT po.*,
+             COALESCE(
+               NULLIF(po.total, 0),
+               (SELECT SUM(p.total) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as total,
+             COALESCE(
+               NULLIF(po.subtotal, 0),
+               (SELECT SUM(p.subtotal) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as subtotal,
+             COALESCE(
+               NULLIF(po.gst_amount, 0),
+               (SELECT SUM(p.gst_amount) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as gst_amount,
+             v.name as vendor_name, w.name as warehouse_name
       FROM purchase_orders po
       LEFT JOIN vendors v ON po.vendor_id = v.id
       LEFT JOIN warehouses w ON po.warehouse_id = w.id
@@ -1666,14 +1844,23 @@ export const getPurchaseOrders = async (req, res, next) => {
     }
 
     if (status && status !== 'all') {
-      query += ' AND po.status = ?';
-      queryParams.push(status);
+      if (status === 'Partially Pending' || status === 'Partially Received') {
+        query += " AND po.status IN ('Partially Pending', 'Partially Received')";
+      } else if (status === 'Pending' || status === 'Draft') {
+        query += " AND po.status IN ('Pending', 'Draft')";
+      } else {
+        query += ' AND po.status = ?';
+        queryParams.push(status);
+      }
     }
 
     query += ' ORDER BY po.date DESC, po.created_at DESC LIMIT ? OFFSET ?';
     queryParams.push(Number(limit), Number(offset));
 
     const [orders] = await req.db.query(query, queryParams);
+    orders.forEach(o => {
+      if (o.status === 'Partially Received') o.status = 'Partially Pending';
+    });
     return res.status(200).json({ success: true, count: orders.length, purchaseOrders: orders });
   } catch (error) {
     next(error);
@@ -1688,7 +1875,23 @@ export const getPurchaseOrderById = async (req, res, next) => {
     const { id } = req.params;
 
     const [orders] = await req.db.query(`
-      SELECT po.*, v.name as vendor_name, v.phone as vendor_phone, v.email as vendor_email, 
+      SELECT po.*,
+             COALESCE(
+               NULLIF(po.total, 0),
+               (SELECT SUM(p.total) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as total,
+             COALESCE(
+               NULLIF(po.subtotal, 0),
+               (SELECT SUM(p.subtotal) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as subtotal,
+             COALESCE(
+               NULLIF(po.gst_amount, 0),
+               (SELECT SUM(p.gst_amount) FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'),
+               0
+             ) as gst_amount,
+             v.name as vendor_name, v.phone as vendor_phone, v.email as vendor_email, 
              v.address as vendor_address, v.gstin as vendor_gstin,
              w.name as warehouse_name, COALESCE(u.name, 'Admin') as prepared_by
       FROM purchase_orders po
@@ -1703,11 +1906,28 @@ export const getPurchaseOrderById = async (req, res, next) => {
     }
 
     const order = orders[0];
+    if (order.status === 'Partially Received') order.status = 'Partially Pending';
 
-    // Fetch items with GRN delivered and damaged metrics
+    // Fetch items with GRN delivered and damaged metrics, and enrich verified purchase rates
     const [items] = await req.db.query(`
       SELECT poi.*, 
              pr.name as product_name, pr.unit, pr.barcode, cat.name as category,
+             COALESCE(b.name, pr.brand) as brand, pr.measurement_value,
+             COALESCE(
+               NULLIF(poi.purchase_price, 0),
+               (SELECT pi.purchase_price FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id ORDER BY pi.id DESC LIMIT 1),
+               0
+             ) as purchase_price,
+             COALESCE(
+               NULLIF(poi.gst, 0),
+               (SELECT pi.gst FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id ORDER BY pi.id DESC LIMIT 1),
+               0
+             ) as gst,
+             COALESCE(
+               NULLIF(poi.total, 0),
+               (SELECT SUM(pi.total) FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id AND p.payment_status != 'Void'),
+               0
+             ) as total,
              COALESCE((
                SELECT SUM(gi.quantity_received)
                FROM grn_items gi 
@@ -1729,6 +1949,7 @@ export const getPurchaseOrderById = async (req, res, next) => {
       FROM purchase_order_items poi
       JOIN products pr ON poi.product_id = pr.id
       LEFT JOIN categories cat ON pr.category_id = cat.id
+      LEFT JOIN brands b ON pr.brand_id = b.id
       WHERE poi.purchase_order_id = ?
     `, [id]);
 
@@ -1778,23 +1999,133 @@ export const getPurchaseOrderById = async (req, res, next) => {
     order.total_accepted_quantity = sumAccepted;
     order.total_damaged_deduction = Number(sumDamagedDeduction.toFixed(2));
     order.net_payable_total = Number(sumAcceptedTotal.toFixed(2));
+    if (Number(order.total) === 0 && order.net_payable_total > 0) {
+      order.total = order.net_payable_total;
+    }
 
-    // Fetch linked GRNs
+    // Fetch linked GRNs with item breakdown and installment calculations
     const [grns] = await req.db.query(
-      'SELECT id, grn_no, date, created_at FROM grns WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+      'SELECT id, grn_no, date, notes, created_at FROM grns WHERE purchase_order_id = ? ORDER BY date ASC, id ASC',
       [id]
     );
     order.grns = grns;
 
+    const shipments = [];
+    for (let sIdx = 0; sIdx < grns.length; sIdx++) {
+      const g = grns[sIdx];
+      const [gItems] = await req.db.query(`
+        SELECT gi.*, pr.name as product_name, pr.unit, pr.barcode, pr.sku
+        FROM grn_items gi
+        JOIN products pr ON gi.product_id = pr.id
+        WHERE gi.grn_id = ?
+      `, [g.id]);
+
+      let shipReceived = 0;
+      let shipDamaged = 0;
+      let shipRejected = 0;
+      let shipAccepted = 0;
+      let shipSubtotal = 0;
+      let shipGst = 0;
+      let shipTotal = 0;
+      let shipDamagedVal = 0;
+      const itemsDetail = [];
+
+      for (const it of gItems) {
+        const qRec = Number(it.quantity_received || 0);
+        const qDam = Number(it.quantity_damaged || 0);
+        const qRej = Number(it.quantity_rejected || 0);
+        const netAcc = Math.max(0, qRec - qDam - qRej);
+
+        const matchItem = items.find(poi => Number(poi.product_id) === Number(it.product_id));
+        const unitPrice = matchItem ? Number(matchItem.purchase_price || 0) : 0;
+        const unitGst = matchItem ? Number(matchItem.gst || 0) : 0;
+
+        const lineSub = Number((netAcc * unitPrice).toFixed(2));
+        const lineTax = Number(((lineSub * unitGst) / 100).toFixed(2));
+        const lineTot = Number((lineSub + lineTax).toFixed(2));
+        const damVal = Number(((qDam * unitPrice) * (1 + unitGst / 100)).toFixed(2));
+
+        shipReceived += qRec;
+        shipDamaged += qDam;
+        shipRejected += qRej;
+        shipAccepted += netAcc;
+        shipSubtotal += lineSub;
+        shipGst += lineTax;
+        shipTotal += lineTot;
+        shipDamagedVal += damVal;
+
+        itemsDetail.push({
+          product_id: it.product_id,
+          product_name: it.product_name,
+          unit: it.unit,
+          barcode: it.barcode,
+          quantity_received: qRec,
+          quantity_damaged: qDam,
+          quantity_rejected: qRej,
+          net_accepted: netAcc,
+          unit_price: unitPrice,
+          gst: unitGst,
+          total: lineTot,
+          batch_number: it.batch_number,
+          mrp: it.mrp,
+          selling_price: it.selling_price
+        });
+      }
+
+      shipments.push({
+        id: g.id,
+        installment_no: sIdx + 1,
+        grn_no: g.grn_no,
+        date: g.date,
+        created_at: g.created_at,
+        notes: g.notes,
+        total_received: shipReceived,
+        total_damaged: shipDamaged,
+        total_rejected: shipRejected,
+        total_accepted: shipAccepted,
+        subtotal: Number(shipSubtotal.toFixed(2)),
+        gst_amount: Number(shipGst.toFixed(2)),
+        amount: Number(shipTotal.toFixed(2)),
+        damaged_value: Number(shipDamagedVal.toFixed(2)),
+        items: itemsDetail
+      });
+    }
+    order.shipments = shipments;
+
     // Fetch linked Invoices
     try {
       const [invoices] = await req.db.query(
-        'SELECT id, purchase_no, date, total, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+        'SELECT id, purchase_no, date, total, paid_amount, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
         [id]
       );
       order.invoices = invoices;
     } catch (e) {
       order.invoices = [];
+    }
+
+    // Fetch linked Payments across PO invoices
+    try {
+      const [orderPayments] = await req.db.query(`
+        SELECT sp.id, sp.payment_no, sp.payment_date, sp.amount, sp.payment_mode, sp.reference_no, sp.remarks, sp.created_at, p.purchase_no
+        FROM supplier_payments sp
+        JOIN purchases p ON sp.purchase_id = p.id
+        WHERE p.purchase_order_id = ?
+        ORDER BY sp.payment_date ASC, sp.id ASC
+      `, [id]);
+      order.payments = orderPayments.map((p, idx) => ({
+        installment_no: idx + 1,
+        id: p.id,
+        payment_no: p.payment_no,
+        payment_date: p.payment_date,
+        amount: Number(p.amount || 0),
+        payment_mode: p.payment_mode || 'Cash',
+        reference_no: p.reference_no,
+        remarks: p.remarks,
+        purchase_no: p.purchase_no,
+        created_at: p.created_at
+      }));
+    } catch (e) {
+      order.payments = [];
     }
 
     return res.status(200).json({ success: true, order });
@@ -1886,7 +2217,7 @@ export const createPurchaseOrder = async (req, res, next) => {
     // Insert PO (including user_id for tracking Prepared By metadata)
     const [result] = await connection.query(
       `INSERT INTO purchase_orders (purchase_order_no, vendor_id, warehouse_id, date, expected_delivery_date, subtotal, discount, gst_amount, total, status, notes, user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
       [poNo, vendor_id, warehouse_id, date, expected_delivery_date || null, finalSubtotal, discount || 0, finalGst, finalTotal, notes || null, validUserId]
     );
 
@@ -1921,7 +2252,7 @@ export const createPurchaseOrder = async (req, res, next) => {
         updateVals.push(item.itemPrice);
       }
 
-      if (item.itemGst !== undefined && item.itemGst !== null && item.itemGst >= 0) {
+      if (item.itemPrice > 0 && item.itemGst !== undefined && item.itemGst !== null && item.itemGst >= 0) {
         updateCols.push('gst = ?');
         updateVals.push(item.itemGst);
       }
@@ -1958,10 +2289,14 @@ export const createPurchaseOrder = async (req, res, next) => {
 export const updatePurchaseOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    let { status, force } = req.body;
 
     if (!status) {
       return res.status(400).json({ success: false, message: 'Status field is required' });
+    }
+
+    if (status === 'Partially Received') {
+      status = 'Partially Pending';
     }
 
     const [po] = await req.db.query('SELECT purchase_order_no FROM purchase_orders WHERE id = ?', [id]);
@@ -1969,10 +2304,32 @@ export const updatePurchaseOrderStatus = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Purchase order not found' });
     }
 
+    if (status === 'Completed' && !force) {
+      const [poItems] = await req.db.query(
+        'SELECT quantity, delivered_quantity, received_quantity, damaged_quantity, rejected_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
+        [id]
+      );
+      const hasIncompleteItems = poItems.some(it => {
+        const ord = Number(it.quantity || 0);
+        const rec = Number(it.received_quantity || 0);
+        // Only 100% net accepted good inventory completes the order. Missing or damaged goods keep it in Partially Pending.
+        return rec < ord;
+      });
+      if (hasIncompleteItems) {
+        await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', ['Partially Pending', id]);
+        await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Purchase Order "${po[0].purchase_order_no}" status updated to "Partially Pending" (partial goods received)`, req.ip);
+        return res.status(200).json({
+          success: true,
+          status: 'Partially Pending',
+          message: 'Purchase Order status set to "Partially Pending" because full accepted stock has not arrived yet.'
+        });
+      }
+    }
+
     await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [status, id]);
     await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Updated Purchase Order "${po[0].purchase_order_no}" status to "${status}"`, req.ip);
 
-    return res.status(200).json({ success: true, message: 'Purchase order status updated successfully' });
+    return res.status(200).json({ success: true, status, message: 'Purchase order status updated successfully' });
   } catch (error) {
     next(error);
   }
@@ -2116,7 +2473,10 @@ export const createGRN = async (req, res, next) => {
           ? Number(poItem.purchase_price)
           : defaultProdPurchasePrice);
 
-      const itemGst = Number(poItem?.gst ?? item.gst ?? defaultProdGst);
+      const rawGst = item.gst ?? item.itemGst ?? item.gstPercent;
+      const itemGst = (rawGst !== undefined && rawGst !== null && rawGst !== '' && !isNaN(Number(rawGst)) && Number(rawGst) >= 0)
+        ? Number(rawGst)
+        : Number(poItem?.gst ?? defaultProdGst);
 
       let resolvedBatchNo = item.batch_number || item.batch_no;
       if (!resolvedBatchNo || String(resolvedBatchNo).trim() === '' || String(resolvedBatchNo).startsWith('BATCH-')) {
@@ -2162,16 +2522,18 @@ export const createGRN = async (req, res, next) => {
         );
       }
 
-      // Update PO items with Delivered, Damaged, Rejected and Net Accepted Quantities
+      // Update PO items with Delivered, Damaged, Rejected, Net Accepted Quantities, and verified rate & gst
       if (poItem) {
         await connection.query(
           `UPDATE purchase_order_items 
            SET delivered_quantity = delivered_quantity + ?,
                damaged_quantity = damaged_quantity + ?,
                rejected_quantity = rejected_quantity + ?,
-               received_quantity = received_quantity + ?
+               received_quantity = received_quantity + ?,
+               purchase_price = CASE WHEN ? > 0 THEN ? ELSE purchase_price END,
+               gst = CASE WHEN ? >= 0 THEN ? ELSE gst END
            WHERE id = ?`,
-          [qtyRec, qtyDam, qtyRej, netAcceptedQty, poItem.id]
+          [qtyRec, qtyDam, qtyRej, netAcceptedQty, itemPurchasePrice, itemPurchasePrice, itemGst, itemGst, poItem.id]
         );
       }
 
@@ -2275,16 +2637,37 @@ export const createGRN = async (req, res, next) => {
 
     // Look up if a Purchase Invoice already exists for THIS Purchase Order
     const [existingPOInvoices] = await connection.query(
-      'SELECT id, purchase_no, subtotal, gst_amount, total FROM purchases WHERE purchase_order_id = ? LIMIT 1',
+      'SELECT id, purchase_no, grn_id, subtotal, gst_amount, total FROM purchases WHERE purchase_order_id = ? LIMIT 1',
       [poId]
     );
 
     if (existingPOInvoices.length > 0) {
       if (grnPayableTotal > 0) {
         const currentPurchId = existingPOInvoices[0].id;
-        const newSubtotal = Number((Number(existingPOInvoices[0].subtotal || 0) + grnPayableSubtotal).toFixed(2));
-        const newGst = Number((Number(existingPOInvoices[0].gst_amount || 0) + grnPayableGst).toFixed(2));
-        const newTotal = Number((Number(existingPOInvoices[0].total || 0) + grnPayableTotal).toFixed(2));
+        const isDraftInvoice = Number(existingPOInvoices[0].total || 0) === 0;
+
+        let newSubtotal = grnPayableSubtotal;
+        let newGst = grnPayableGst;
+        let newTotal = grnPayableTotal;
+
+        if (isDraftInvoice) {
+          // If invoice had 0 total (draft PO billing), replace with verified GRN totals and wipe any dummy items
+          newSubtotal = grnPayableSubtotal;
+          newGst = grnPayableGst;
+          newTotal = grnPayableTotal;
+          await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [currentPurchId]);
+        } else if (existingPOInvoices[0].grn_id === grnId) {
+          // Same GRN update: re-sync values directly without accumulating
+          newSubtotal = grnPayableSubtotal;
+          newGst = grnPayableGst;
+          newTotal = grnPayableTotal;
+          await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [currentPurchId]);
+        } else {
+          // Genuine partial shipment on non-zero invoice
+          newSubtotal = Number((Number(existingPOInvoices[0].subtotal || 0) + grnPayableSubtotal).toFixed(2));
+          newGst = Number((Number(existingPOInvoices[0].gst_amount || 0) + grnPayableGst).toFixed(2));
+          newTotal = Number((Number(existingPOInvoices[0].total || 0) + grnPayableTotal).toFixed(2));
+        }
 
         await connection.query(
           'UPDATE purchases SET grn_id = ?, subtotal = ?, gst_amount = ?, total = ? WHERE id = ?',
@@ -2302,18 +2685,25 @@ export const createGRN = async (req, res, next) => {
           }
         }
 
-        // Recalculate vendor balances
+        // Recalculate vendor balances based strictly on remaining unpaid dues
         const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
         if (vRow.length > 0) {
-          const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [vendor_id]);
+          const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
           const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
+          const [paidInvSum] = await connection.query('SELECT COALESCE(SUM(paid_amount), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
           const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+          const [unpaidDueSum] = await connection.query(`
+            SELECT COALESCE(SUM(
+              CASE 
+                WHEN payment_status = 'Paid' THEN 0 
+                WHEN payment_status = 'Void' THEN 0 
+                ELSE GREATEST(0, total - COALESCE(paid_amount, 0)) 
+              END
+            ), 0) as total FROM purchases WHERE vendor_id = ?`, [vendor_id]);
+
           const grossP = Number(invSum[0].total || 0);
-          const retP = Number(retSum[0].total || 0);
-          const netP = Math.max(0, grossP - retP);
-          const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
-          const totPaid = Number(paySum[0].total || 0);
-          const newBal = Math.max(0, (netP + openBal) - totPaid);
+          const totPaid = Math.max(Number(paidInvSum[0].total || 0), Number(paySum[0].total || 0));
+          const newBal = Number(Number(unpaidDueSum[0].total || 0).toFixed(2));
 
           await connection.query('UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?', [grossP, totPaid, newBal, vendor_id]);
 
@@ -2367,16 +2757,22 @@ export const createGRN = async (req, res, next) => {
       // Update vendor balance & vendor_ledger
       const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
       if (vRow.length > 0) {
-        const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [vendor_id]);
+        const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
         const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
+        const [paidInvSum] = await connection.query('SELECT COALESCE(SUM(paid_amount), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
         const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+        const [unpaidDueSum] = await connection.query(`
+          SELECT COALESCE(SUM(
+            CASE 
+              WHEN payment_status = 'Paid' THEN 0 
+              WHEN payment_status = 'Void' THEN 0 
+              ELSE GREATEST(0, total - COALESCE(paid_amount, 0)) 
+            END
+          ), 0) as total FROM purchases WHERE vendor_id = ?`, [vendor_id]);
 
         const grossP = Number(invSum[0].total || 0);
-        const retP = Number(retSum[0].total || 0);
-        const netP = Math.max(0, grossP - retP);
-        const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
-        const totPaid = Number(paySum[0].total || 0);
-        const newBal = Math.max(0, (netP + openBal) - totPaid);
+        const totPaid = Math.max(Number(paidInvSum[0].total || 0), Number(paySum[0].total || 0));
+        const newBal = Number(Number(unpaidDueSum[0].total || 0).toFixed(2));
 
         await connection.query(
           'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
@@ -2391,36 +2787,90 @@ export const createGRN = async (req, res, next) => {
       }
     }
 
-    // Update PO Status based on Net Accepted quantities and finalize_po flag
-    const [updatedPOItems] = await connection.query('SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+    // Update PO Status based on full stock arrival (net good accepted stock vs ordered quantities)
+    const [updatedPOItems] = await connection.query(
+      'SELECT quantity, delivered_quantity, received_quantity, damaged_quantity, rejected_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
+      [poId]
+    );
     let allReceived = true;
     let anyReceived = false;
 
     for (const it of updatedPOItems) {
-      if (Number(it.received_quantity) < Number(it.quantity)) {
+      const ordQty = Number(it.quantity || 0);
+      const delQty = Number(it.delivered_quantity || 0);
+      const recQty = Number(it.received_quantity || 0);
+      const damQty = Number(it.damaged_quantity || 0);
+      const rejQty = Number(it.rejected_quantity || 0);
+
+      // Order is complete ONLY if net good accepted units satisfy the full ordered quantity.
+      // If any item has recQty < ordQty (due to missing, damaged, or rejected stock), it is NOT complete!
+      if (recQty < ordQty) {
         allReceived = false;
       }
-      if (Number(it.received_quantity) > 0) {
+      if (recQty > 0 || delQty > 0 || damQty > 0 || rejQty > 0) {
         anyReceived = true;
       }
     }
 
-    const shouldComplete = finalize_po === true || allReceived;
-    const newPOStatus = shouldComplete ? 'Completed' : (anyReceived ? 'Partially Received' : 'Confirmed');
+    // A Purchase Order completes immediately once 100% full good stock has arrived for all items!
+    // If any item is missing/damaged/short, it remains in 'Partially Pending' status until full stock arrives.
+    const newPOStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
 
-    await connection.query(
-      'UPDATE purchase_orders SET status = ? WHERE id = ?',
-      [newPOStatus, poId]
+    // Recalculate and update PO real-time total amounts from linked purchases / GRNs
+    const [poPurchTotals] = await connection.query(
+      `SELECT COALESCE(SUM(subtotal), 0) as subtotal, 
+              COALESCE(SUM(gst_amount), 0) as gst_amount, 
+              COALESCE(SUM(total), 0) as total 
+       FROM purchases 
+       WHERE purchase_order_id = ? AND payment_status != 'Void'`,
+      [poId]
     );
 
+    const poSubtotal = Number(poPurchTotals[0]?.subtotal || grnPayableSubtotal || 0);
+    const poGst = Number(poPurchTotals[0]?.gst_amount || grnPayableGst || 0);
+    const poTotal = Number(poPurchTotals[0]?.total || grnPayableTotal || 0);
+
+    await connection.query(
+      'UPDATE purchase_orders SET subtotal = ?, gst_amount = ?, total = ?, status = ? WHERE id = ?',
+      [poSubtotal, poGst, poTotal, newPOStatus, poId]
+    );
+
+    // Update purchase_order_items with verified prices, MRP, GST and cumulative line totals
+    for (const it of grnItemsForInvoice) {
+      if (it.productId) {
+        const [purchItemSum] = await connection.query(
+          `SELECT COALESCE(SUM(pi.total), 0) as line_total
+           FROM purchase_items pi
+           JOIN purchases p ON pi.purchase_id = p.id
+           WHERE p.purchase_order_id = ? AND pi.product_id = ? AND p.payment_status != 'Void'`,
+          [poId, it.productId]
+        );
+        const lineTotal = Number(Number(purchItemSum[0]?.line_total || 0).toFixed(2));
+        await connection.query(
+          `UPDATE purchase_order_items 
+           SET purchase_price = ?, mrp = ?, gst = ?, total = ?
+           WHERE purchase_order_id = ? AND product_id = ?`,
+          [it.purchasePrice, it.mrp, it.gst, lineTotal, poId, it.productId]
+        );
+      }
+    }
+
     await connection.commit();
-    await logActivity(req.user.id, 'Create GRN', 'Purchases', `Created Goods Received Note "${grnNo}" for PO "${purchase_order_no}"`, req.ip);
+    await logActivity(req.user.id, 'Create GRN', 'Purchases', `Created Goods Received Note "${grnNo}" for PO "${purchase_order_no}" (Status: ${newPOStatus}, Total: ₹${poTotal})`, req.ip, req.db);
+
+    const completionMsg = allReceived
+      ? 'Goods Received Note saved. Full stock received and Purchase Order completed.'
+      : 'Goods Received Note saved. Partial stock inwarded. Purchase Order remains open under "Partially Pending" for missing items.';
 
     return res.status(201).json({
       success: true,
-      message: 'Goods Received Note saved and stock levels updated successfully',
+      message: completionMsg,
       grnNo,
-      grnId
+      grnId,
+      poStatus: newPOStatus,
+      poTotal,
+      poSubtotal,
+      poGstAmount: poGst
     });
   } catch (error) {
     await connection.rollback();

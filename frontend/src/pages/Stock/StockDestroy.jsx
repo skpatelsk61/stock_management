@@ -19,7 +19,9 @@ import {
   NoSymbolIcon,
   ArrowRightIcon,
   ShieldExclamationIcon,
-  ClockIcon
+  ClockIcon,
+  ChevronDownIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
 import Modal from '../../components/common/Modal';
@@ -160,7 +162,16 @@ const StockDestroy = ({ onStockChanged }) => {
         });
         prods = prods.map(p => ({
           ...p,
+          brand: p.brand || p.brand_name || '',
+          measurement_value: p.measurement_value || '',
           currentStock: stockMap[p.id] !== undefined ? stockMap[p.id] : Number(p.currentStock || p.total_stock || p.stock || 0)
+        }));
+      } else {
+        prods = prods.map(p => ({
+          ...p,
+          brand: p.brand || p.brand_name || '',
+          measurement_value: p.measurement_value || '',
+          currentStock: Number(p.currentStock || p.total_stock || p.stock || 0)
         }));
       }
 
@@ -185,10 +196,89 @@ const StockDestroy = ({ onStockChanged }) => {
     fetchAllData();
   }, [selectedReasonFilter, selectedStatusFilter, selectedBatchFilter, startDateFilter, endDateFilter]);
 
-  // Handle Product Selection and fetch Batches
-  const handleProductChange = async (e) => {
-    const pId = e.target.value;
-    if (!pId) {
+  // Tree Dropdown interactive states
+  const productDropdownRef = useRef(null);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [productSearch, setProductSearch] = useState('');
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (productDropdownRef.current && !productDropdownRef.current.contains(event.target)) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Group products by product name (brand) for tree structure
+  const groupedProducts = useMemo(() => {
+    const groups = {};
+    productsList.forEach((p) => {
+      const brandStr = (p.brand || '').trim();
+      const nameStr = (p.name || '').trim();
+      const grpKey = `${nameStr.toLowerCase()}__${brandStr.toLowerCase()}`;
+      const displayName = brandStr ? `${nameStr} (${brandStr})` : nameStr;
+
+      if (!groups[grpKey]) {
+        groups[grpKey] = {
+          key: grpKey,
+          name: nameStr,
+          brand: brandStr,
+          displayName,
+          variants: []
+        };
+      }
+      groups[grpKey].variants.push(p);
+    });
+    return Object.values(groups);
+  }, [productsList]);
+
+  // Search filtered product groups
+  const searchedGroupedProducts = useMemo(() => {
+    if (!productSearch.trim()) return groupedProducts;
+    const q = productSearch.toLowerCase().trim();
+    return groupedProducts.filter((grp) => {
+      const matchGroup = grp.displayName.toLowerCase().includes(q);
+      const matchVariant = grp.variants.some(
+        (v) =>
+          (v.measurement_value && v.measurement_value.toLowerCase().includes(q)) ||
+          (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+          v.name.toLowerCase().includes(q)
+      );
+      return matchGroup || matchVariant;
+    });
+  }, [groupedProducts, productSearch]);
+
+  const toggleGroupCollapse = (key, e) => {
+    if (e) e.stopPropagation();
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleToggleAllGroups = () => {
+    const allCollapsed = groupedProducts.every((g) => collapsedGroups[g.key]);
+    if (allCollapsed) {
+      setCollapsedGroups({}); // expand all
+    } else {
+      const all = {};
+      groupedProducts.forEach((g) => { all[g.key] = true; });
+      setCollapsedGroups(all); // collapse all
+    }
+  };
+
+  const selectedProductObj = useMemo(() => {
+    return productsList.find((p) => String(p.id) === String(formData.productId));
+  }, [productsList, formData.productId]);
+
+  // Handle Product Selection & Batches (supports unselecting)
+  const handleSelectProduct = async (pId) => {
+    if (!pId || String(formData.productId) === String(pId)) {
+      // Toggle off / Unselect
       setFormData(prev => ({
         ...prev,
         productId: '',
@@ -219,7 +309,7 @@ const StockDestroy = ({ onStockChanged }) => {
         sku: prod.sku || 'N/A',
         batchId: '',
         batchNo: 'DEFAULT',
-        availableStock: Number(prod.currentStock || prod.stock || 0),
+        availableStock: Number(prod.currentStock || prod.total_stock || prod.stock || 0),
         batchAvailableStock: null,
         unitCost: pCost,
         purchasePrice: pCost,
@@ -227,6 +317,7 @@ const StockDestroy = ({ onStockChanged }) => {
         unit: prod.unit || 'Pcs'
       }));
       setFormErrors(prev => ({ ...prev, destroyQuantity: null, productId: null }));
+      setIsProductDropdownOpen(false);
 
       // Fetch active batches for selected product
       setLoadingBatches(true);
@@ -244,6 +335,10 @@ const StockDestroy = ({ onStockChanged }) => {
         setLoadingBatches(false);
       }
     }
+  };
+
+  const handleProductChange = (e) => {
+    handleSelectProduct(e?.target?.value);
   };
 
   // Handle Batch Selection
@@ -582,26 +677,302 @@ const StockDestroy = ({ onStockChanged }) => {
                 </div>
               </div>
 
-              {/* Product Selection */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Select Product <span className="text-red-500">*</span>
+              {/* Product Selection with Tree Dropdown */}
+              <div className="relative" ref={productDropdownRef}>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                  <span>
+                    Select Product <span className="text-red-500">*</span>
+                  </span>
+                  {selectedProductObj && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectProduct('')}
+                      className="text-[11px] font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                    >
+                      <XMarkIcon className="w-3 h-3" /> Unselect
+                    </button>
+                  )}
                 </label>
-                <select
-                  value={formData.productId}
-                  onChange={handleProductChange}
-                  className={`w-full px-3 py-2.5 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border ${
-                    formErrors.productId ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
-                  } focus:ring-2 focus:ring-red-500`}
+
+                {/* Custom Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsProductDropdownOpen((prev) => !prev)}
+                  className={`w-full bg-gray-50/90 dark:bg-gray-750 hover:bg-gray-100 dark:hover:bg-gray-700 border ${
+                    formErrors.productId
+                      ? 'border-red-500'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-red-400'
+                  } rounded-xl px-3 py-2 text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all flex items-center justify-between cursor-pointer shadow-2xs text-left`}
                 >
-                  <option value="">-- Choose Product from Catalogue --</option>
-                  {productsList.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.barcode || p.sku || 'No Barcode'}) - Stock: {p.currentStock || 0} {p.unit || 'Pcs'}
-                    </option>
-                  ))}
-                </select>
-                {formErrors.productId && <p className="text-[11px] text-red-500 mt-1">{formErrors.productId}</p>}
+                  <div className="flex items-center gap-2 truncate">
+                    {selectedProductObj ? (
+                      <span className="truncate text-gray-900 dark:text-white font-extrabold flex items-center gap-1.5">
+                        <span>
+                          {selectedProductObj.brand
+                            ? `${selectedProductObj.name} (${selectedProductObj.brand})`
+                            : selectedProductObj.name}
+                        </span>
+                        <span className="text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                          {selectedProductObj.measurement_value || selectedProductObj.unit || 'Standard'}
+                        </span>
+                        {Number(selectedProductObj.currentStock || 0) <= 0 ? (
+                          <span className="text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                            Out of Stock
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                            Stock: {selectedProductObj.currentStock}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-400 font-medium">
+                        -- Choose Product from Catalogue --
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    {formData.productId && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectProduct('');
+                        }}
+                        className="p-1 rounded-md text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                        title="Unselect Product"
+                      >
+                        <XMarkIcon className="w-4 h-4" />
+                      </span>
+                    )}
+                    <ChevronDownIcon
+                      className={`w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 ${
+                        isProductDropdownOpen ? 'rotate-180 text-red-500' : ''
+                      }`}
+                    />
+                  </div>
+                </button>
+
+                {formErrors.productId && (
+                  <p className="mt-1 text-xs text-red-500">{formErrors.productId}</p>
+                )}
+
+                {/* Tree Dropdown Menu Popover */}
+                {isProductDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden animate-fadeIn">
+                    {/* Search & Bulk Expand Header */}
+                    <div className="p-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 space-y-2">
+                      <div className="relative">
+                        <MagnifyingGlassIcon className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={productSearch}
+                          onChange={(e) => setProductSearch(e.target.value)}
+                          placeholder="Search product name, brand or weight..."
+                          className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg pl-8 pr-3 py-1.5 text-xs font-semibold text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-red-500"
+                        />
+                        {productSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setProductSearch('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                          >
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-gray-500 dark:text-gray-400 px-1">
+                        <span>
+                          {searchedGroupedProducts.length} Product Group{searchedGroupedProducts.length === 1 ? '' : 's'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleToggleAllGroups}
+                          className="text-red-600 dark:text-red-400 hover:text-red-800 font-bold hover:underline cursor-pointer"
+                        >
+                          {groupedProducts.every((g) => collapsedGroups[g.key]) ? 'Expand All' : 'Collapse All'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Selected Product Banner with Unselect Action */}
+                    {selectedProductObj && (
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-red-50 dark:bg-red-950/40 border-b border-red-100 dark:border-red-900 text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[10px] uppercase font-extrabold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/60 border border-red-200 dark:border-red-800 px-1.5 py-0.5 rounded shrink-0">
+                            Selected
+                          </span>
+                          <span className="font-extrabold text-red-950 dark:text-red-100 truncate">
+                            {selectedProductObj.name} {selectedProductObj.brand ? `(${selectedProductObj.brand})` : ''} - {selectedProductObj.measurement_value || selectedProductObj.unit}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectProduct('')}
+                          className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-600 hover:text-rose-800 dark:text-rose-300 bg-white dark:bg-gray-850 border border-rose-200 dark:border-rose-800 px-2 py-0.5 rounded-md cursor-pointer transition-colors shrink-0 ml-2"
+                          title="Unselect product"
+                        >
+                          <XMarkIcon className="w-3.5 h-3.5" />
+                          Unselect
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Scrollable Tree List with scrollbar */}
+                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar p-2 space-y-1.5">
+                      {searchedGroupedProducts.length === 0 ? (
+                        <div className="py-8 text-center text-gray-400 dark:text-gray-500 font-medium text-xs">
+                          No matching products found.
+                        </div>
+                      ) : (
+                        searchedGroupedProducts.map((grp) => {
+                          const isCollapsed = Boolean(collapsedGroups[grp.key]);
+                          const hasSelectedVariant = grp.variants.some((v) => String(v.id) === String(formData.productId));
+
+                          return (
+                            <div
+                              key={grp.key}
+                              className={`border rounded-xl overflow-hidden transition-colors ${
+                                hasSelectedVariant
+                                  ? 'border-red-300 dark:border-red-700 bg-red-50/20 dark:bg-red-950/20 shadow-xs'
+                                  : 'border-gray-200/80 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-2xs'
+                              }`}
+                            >
+                              {/* Parent Product Group Header (Clickable open/close toggle for all products) */}
+                              <div
+                                onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                className={`flex items-center justify-between px-3 py-2 text-xs font-bold cursor-pointer transition-colors ${
+                                  isCollapsed
+                                    ? 'bg-gray-50 dark:bg-gray-750 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200'
+                                    : 'bg-red-50/50 dark:bg-red-950/30 hover:bg-red-50/70 text-red-950 dark:text-red-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleGroupCollapse(grp.key, e)}
+                                    className="p-1 rounded-md text-gray-500 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-100/60 dark:hover:bg-red-950/40 transition-colors"
+                                    title={isCollapsed ? 'Open (Expand)' : 'Close (Collapse)'}
+                                  >
+                                    {isCollapsed ? (
+                                      <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    ) : (
+                                      <ChevronDownIcon className="w-3.5 h-3.5 stroke-[2.5] text-red-600 dark:text-red-400" />
+                                    )}
+                                  </button>
+
+                                  <span className="font-extrabold text-gray-900 dark:text-white tracking-tight truncate">
+                                    {grp.displayName}
+                                  </span>
+
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-red-100/70 dark:bg-red-900/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 shrink-0">
+                                    {grp.variants.length} {grp.variants.length === 1 ? 'Weight' : 'Weights'}
+                                  </span>
+
+                                  {hasSelectedVariant && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0">
+                                      Selected
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0 text-gray-400 dark:text-gray-500 text-[11px] font-semibold">
+                                  <span>{isCollapsed ? 'Open' : 'Close'}</span>
+                                </div>
+                              </div>
+
+                              {/* Child Weight Variants (Visible when group is open/expanded) */}
+                              {!isCollapsed && (
+                                <div className="divide-y divide-gray-100 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                                  {grp.variants.map((v, idx) => {
+                                    const isLast = idx === grp.variants.length - 1;
+                                    const isSelected = String(formData.productId) === String(v.id);
+                                    const stockQty = Number(v.currentStock || v.total_stock || 0);
+
+                                    return (
+                                      <div
+                                        key={v.id}
+                                        onClick={() => handleSelectProduct(v.id)}
+                                        className={`flex items-center justify-between px-3 py-2 pl-7 text-xs font-semibold cursor-pointer transition-colors ${
+                                          isSelected
+                                            ? 'bg-red-600 text-white font-bold'
+                                            : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span
+                                            className={`font-mono text-xs select-none ${
+                                              isSelected ? 'text-red-200' : 'text-gray-400'
+                                            }`}
+                                          >
+                                            {grp.variants.length > 1 ? (isLast ? '└──' : '├──') : '└──'}
+                                          </span>
+
+                                          <span
+                                            className={`px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                                              isSelected
+                                                ? 'bg-white/20 text-white border-white/30'
+                                                : 'bg-amber-50 dark:bg-amber-950/50 text-amber-950 dark:text-amber-200 border-amber-200 dark:border-amber-800'
+                                            }`}
+                                          >
+                                            Weight: <strong>{v.measurement_value || v.unit || 'Standard'}</strong>
+                                          </span>
+
+                                          {v.barcode && (
+                                            <span
+                                              className={`text-[10px] font-mono ${
+                                                isSelected ? 'text-red-200' : 'text-gray-400'
+                                              }`}
+                                            >
+                                              ({v.barcode})
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                          {stockQty <= 0 ? (
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                                isSelected
+                                                  ? 'bg-white/20 text-white border-white/30'
+                                                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                              }`}
+                                            >
+                                              Out of Stock
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                                isSelected
+                                                  ? 'bg-white/20 text-white border-white/30'
+                                                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                              }`}
+                                            >
+                                              Stock: {stockQty}
+                                            </span>
+                                          )}
+
+                                          {isSelected ? (
+                                            <div className="flex items-center gap-1 bg-white/25 px-1.5 py-0.5 rounded text-[10px] font-extrabold text-white">
+                                              <CheckCircleIcon className="w-3.5 h-3.5" />
+                                              <span>Click to unselect</span>
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Locations */}

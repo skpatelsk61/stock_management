@@ -18,17 +18,36 @@ export const runCategorySchemaMigrations = async (pool) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // 2. Ensure brands table exists
+    // 2. Ensure brands table exists and has category_id & sub_category_id
     await pool.query(`
       CREATE TABLE IF NOT EXISTS brands (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(255) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
+        category_id INT NULL,
+        sub_category_id INT NULL,
         status ENUM('Active', 'Inactive') DEFAULT 'Active',
         description TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_brands_category (category_id),
+        INDEX idx_brands_sub_category (sub_category_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    try {
+      const [bCols] = await pool.query('DESCRIBE brands');
+      const bColNames = bCols.map(c => c.Field);
+      if (!bColNames.includes('category_id')) {
+        await pool.query('ALTER TABLE brands ADD COLUMN category_id INT NULL AFTER name');
+        await pool.query('ALTER TABLE brands ADD INDEX idx_brands_category (category_id)');
+      }
+      if (!bColNames.includes('sub_category_id')) {
+        await pool.query('ALTER TABLE brands ADD COLUMN sub_category_id INT NULL AFTER category_id');
+        await pool.query('ALTER TABLE brands ADD INDEX idx_brands_sub_category (sub_category_id)');
+      }
+    } catch (bErr) {
+      console.warn('[Schema Migration] brands columns check notice:', bErr.message);
+    }
 
     // 3. Ensure columns sub_category_id and brand_id exist on products table
     const [cols] = await pool.query('DESCRIBE products');
@@ -684,7 +703,8 @@ export const runCategorySchemaMigrations = async (pool) => {
         SELECT g.id as grn_id, g.grn_no, g.purchase_order_id, g.vendor_id, g.warehouse_id, g.date
         FROM grns g
         WHERE NOT EXISTS (
-          SELECT 1 FROM purchases p WHERE p.grn_id = g.id
+          SELECT 1 FROM purchases p 
+          WHERE p.grn_id = g.id OR (g.purchase_order_id IS NOT NULL AND p.purchase_order_id = g.purchase_order_id AND p.total > 0)
         )
       `);
 
@@ -791,19 +811,23 @@ export const runCategorySchemaMigrations = async (pool) => {
           }
 
           // Reconcile vendor totals
-          const [invSum] = await pool.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [uGrn.vendor_id]);
+          const [invSum] = await pool.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [uGrn.vendor_id]);
           const [retSum] = await pool.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [uGrn.vendor_id]);
+          const [paidInvSum] = await pool.query('SELECT COALESCE(SUM(paid_amount), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [uGrn.vendor_id]);
           const [paySum] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [uGrn.vendor_id]);
-          const [vRow] = await pool.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [uGrn.vendor_id]);
-          if (vRow.length > 0) {
-            const grossP = Number(invSum[0].total || 0);
-            const retP = Number(retSum[0].total || 0);
-            const netP = Math.max(0, grossP - retP);
-            const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
-            const totPaid = Number(paySum[0].total || 0);
-            const newBal = Math.max(0, (netP + openBal) - totPaid);
-            await pool.query('UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?', [grossP, totPaid, newBal, uGrn.vendor_id]);
-          }
+          const [unpaidDueSum] = await pool.query(`
+            SELECT COALESCE(SUM(
+              CASE 
+                WHEN payment_status = 'Paid' THEN 0 
+                WHEN payment_status = 'Void' THEN 0 
+                ELSE GREATEST(0, total - COALESCE(paid_amount, 0)) 
+              END
+            ), 0) as total FROM purchases WHERE vendor_id = ?`, [uGrn.vendor_id]);
+
+          const grossP = Number(invSum[0].total || 0);
+          const totPaid = Math.max(Number(paidInvSum[0].total || 0), Number(paySum[0].total || 0));
+          const newBal = Number(Number(unpaidDueSum[0].total || 0).toFixed(2));
+          await pool.query('UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?', [grossP, totPaid, newBal, uGrn.vendor_id]);
         }
       }
     } catch (e) {
@@ -938,6 +962,75 @@ export const runCategorySchemaMigrations = async (pool) => {
       }
     } catch (e) {
       console.warn('[Schema Migration] settings auto-heal check:', e.message);
+    }
+
+    // ── 11. AUTO-RECONCILE PURCHASE ORDERS TOTALS AND STATUS ──
+    try {
+      await pool.query(`
+        UPDATE purchase_orders po
+        JOIN (
+          SELECT purchase_order_id, 
+                 COALESCE(SUM(subtotal), 0) as calc_subtotal, 
+                 COALESCE(SUM(gst_amount), 0) as calc_gst, 
+                 COALESCE(SUM(total), 0) as calc_total
+          FROM purchases
+          WHERE payment_status != 'Void' AND purchase_order_id IS NOT NULL
+          GROUP BY purchase_order_id
+        ) p ON po.id = p.purchase_order_id
+        SET po.subtotal = p.calc_subtotal,
+            po.gst_amount = p.calc_gst,
+            po.total = p.calc_total
+        WHERE po.total = 0 AND p.calc_total > 0
+      `);
+
+      await pool.query(`
+        UPDATE purchase_orders 
+        SET status = 'Partially Pending' 
+        WHERE status = 'Partially Received'
+      `);
+
+      // Reconcile any Completed POs where accepted good stock is strictly less than ordered quantity (damaged/missing items):
+      await pool.query(`
+        UPDATE purchase_orders po
+        JOIN (
+          SELECT purchase_order_id
+          FROM purchase_order_items
+          GROUP BY purchase_order_id
+          HAVING SUM(received_quantity) < SUM(quantity)
+        ) short_pos ON po.id = short_pos.purchase_order_id
+        SET po.status = 'Partially Pending'
+        WHERE po.status = 'Completed' AND (
+          SELECT COALESCE(SUM(delivered_quantity), 0) + COALESCE(SUM(damaged_quantity), 0) + COALESCE(SUM(received_quantity), 0)
+          FROM purchase_order_items poi2 WHERE poi2.purchase_order_id = po.id
+        ) > 0
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] purchase_orders reconciliation check:', e.message);
+    }
+
+    // Auto-apply essential performance indexes on tenant tables
+    try {
+      const ensureIndex = async (table, indexName, cols) => {
+        try {
+          const [existing] = await pool.query(
+            `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+            [table, indexName]
+          );
+          if (existing.length === 0) {
+            await pool.query(`CREATE INDEX \`${indexName}\` ON \`${table}\` (${cols})`);
+          }
+        } catch (ie) {}
+      };
+
+      await ensureIndex('sales', 'idx_sales_date', 'date');
+      await ensureIndex('sales', 'idx_sales_customer', 'customer_id');
+      await ensureIndex('purchases', 'idx_purchases_date', 'date');
+      await ensureIndex('purchases', 'idx_purchases_vendor', 'vendor_id');
+      await ensureIndex('notifications', 'idx_tenant_notif_created', 'created_at');
+      await ensureIndex('customers', 'idx_cust_phone', 'phone');
+      await ensureIndex('vendors', 'idx_vendor_phone', 'phone');
+    } catch (idxErr) {
+      console.warn('[Schema Migration] performance index verification notice:', idxErr.message);
     }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);

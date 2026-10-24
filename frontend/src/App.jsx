@@ -1,43 +1,49 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
 
 import ProtectedRoute from './components/common/ProtectedRoute';
-
+import PermissionRoute from './components/common/PermissionRoute';
 import MainLayout from './components/layout/MainLayout';
-import Landing from './pages/Landing/Landing';
-import Dashboard from './pages/Dashboard/Dashboard';
-import ProductList from './pages/Products/ProductList';
-import CategoryList from './pages/Categories/CategoryList';
-import PurchaseList from './pages/Purchase/PurchaseList';
-import SalesList from './pages/Sales/SalesList';
-import SalesDashboard from './pages/Sales/SalesDashboard';
-import SalesReturn from './pages/Sales/SalesReturn';
-import StockDashboard from './pages/Stock/StockDashboard';
-import StockIn from './pages/Stock/StockIn';
-import StockOut from './pages/Stock/StockOut';
-import StockAdjustment from './pages/Stock/StockAdjustment';
-import StockHistory from './pages/Stock/StockHistory';
-import VendorReturnManagement from './pages/Stock/VendorReturnManagement';
-import BorrowLedger from './pages/Borrow/BorrowLedger';
-import Reports from './pages/Reports/Reports';
-import SuperAdminDashboard from './pages/SuperAdmin/SuperAdminDashboard';
-import Billing from './pages/Billing/Billing';
-import StoreManagement from './pages/SuperAdmin/StoreManagement';
-import StaffList from './pages/Users/StaffList';
-import NotificationHistory from './pages/Notifications/NotificationHistory';
-import VendorList from './pages/Vendors/VendorList';
-import CustomerList from './pages/Customers/CustomerList';
-import ActivityLogs from './pages/Settings/ActivityLogs';
+
+// Lazy Loaded Pages for Instant Initial Loading & Code Splitting
+const Landing = lazy(() => import('./pages/Landing/Landing'));
+const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
+const ProductList = lazy(() => import('./pages/Products/ProductList'));
+const CategoryList = lazy(() => import('./pages/Categories/CategoryList'));
+const SalesList = lazy(() => import('./pages/Sales/SalesList'));
+const SalesDashboard = lazy(() => import('./pages/Sales/SalesDashboard'));
+const SalesReturn = lazy(() => import('./pages/Sales/SalesReturn'));
+const StockDashboard = lazy(() => import('./pages/Stock/StockDashboard'));
+const VendorReturnManagement = lazy(() => import('./pages/Stock/VendorReturnManagement'));
+const BorrowLedger = lazy(() => import('./pages/Borrow/BorrowLedger'));
+const Reports = lazy(() => import('./pages/Reports/Reports'));
+const SuperAdminDashboard = lazy(() => import('./pages/SuperAdmin/SuperAdminDashboard'));
+const Billing = lazy(() => import('./pages/Billing/Billing'));
+const StoreManagement = lazy(() => import('./pages/SuperAdmin/StoreManagement'));
+const StaffList = lazy(() => import('./pages/Users/StaffList'));
+const NotificationHistory = lazy(() => import('./pages/Notifications/NotificationHistory'));
+const VendorList = lazy(() => import('./pages/Vendors/VendorList'));
+const CustomerList = lazy(() => import('./pages/Customers/CustomerList'));
+const ActivityLogs = lazy(() => import('./pages/Settings/ActivityLogs'));
 
 // Auth Pages
-import Login from './pages/Auth/Login';
-import Register from './pages/Auth/Register';
-import ForgotPassword from './pages/Auth/ForgotPassword';
-import ResetPassword from './pages/Auth/ResetPassword';
+const Login = lazy(() => import('./pages/Auth/Login'));
+const Register = lazy(() => import('./pages/Auth/Register'));
+const ForgotPassword = lazy(() => import('./pages/Auth/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/Auth/ResetPassword'));
 
-import PermissionRoute from './components/common/PermissionRoute';
-import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { hideToast } from './store/slices/notificationSlice';
+
+// Sleek fast-loading placeholder for async routes
+const PageLoader = () => (
+  <div className="flex h-[60vh] w-full items-center justify-center">
+    <div className="flex flex-col items-center gap-2.5">
+      <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-600 rounded-full animate-spin" />
+      <span className="text-xs font-semibold text-slate-400">Loading module...</span>
+    </div>
+  </div>
+);
 
 const GlobalToast = () => {
   const toast = useAppSelector((state) => state.notifications.toast);
@@ -112,50 +118,52 @@ function App() {
         }}
       />
       <GlobalToast />
-      <Routes>
-        {/* Public Home & Auth Routes */}
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/register-store" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Public Home & Auth Routes */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/register-store" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
-        {/* Protected Super Admin Platform Routes */}
-        <Route element={<ProtectedRoute allowedRoles={['Super Admin']} />}>
-          <Route path="/superadmin" element={<SuperAdminDashboard />} />
-          <Route path="/superadmin/stores" element={<StoreManagement />} />
-        </Route>
-
-        {/* Protected ERP Modules Routes */}
-        <Route element={<ProtectedRoute allowedRoles={['Super Admin', 'Admin', 'Sales Manager', 'Purchase Manager', 'Employee', 'Purchase Employee', 'Sales Employee']} />}>
-          <Route path="/dashboard" element={<MainLayout />}>
-            <Route index element={<PermissionRoute permission="view_dashboard"><Dashboard /></PermissionRoute>} />
-            <Route path="products" element={<PermissionRoute permission="view_products"><ProductList /></PermissionRoute>} />
-            <Route path="categories" element={<PermissionRoute permission="view_categories"><CategoryList /></PermissionRoute>} />
-            <Route path="vendors" element={<PermissionRoute permission="view_vendors"><VendorList /></PermissionRoute>} />
-            <Route path="customers" element={<PermissionRoute permission="manage_customers"><CustomerList /></PermissionRoute>} />
-            <Route path="purchase" element={<PermissionRoute permission="view_purchases"><StockDashboard /></PermissionRoute>} />
-            <Route path="purchase/orders" element={<PermissionRoute permission="view_purchases"><StockDashboard /></PermissionRoute>} />
-            <Route path="sales" element={<PermissionRoute permission="view_sales"><SalesList /></PermissionRoute>} />
-            <Route path="sales/returns" element={<PermissionRoute permission="view_sales"><SalesReturn /></PermissionRoute>} />
-            <Route path="sales-dashboard" element={<PermissionRoute permission="view_sales"><SalesDashboard /></PermissionRoute>} />
-            <Route path="stock" element={<PermissionRoute permission="view_stock"><StockDashboard /></PermissionRoute>} />
-            <Route path="stock/in" element={<PermissionRoute permission="view_stock"><StockDashboard /></PermissionRoute>} />
-            <Route path="stock/out" element={<PermissionRoute permission="view_stock"><StockDashboard /></PermissionRoute>} />
-            <Route path="stock/adjustment" element={<PermissionRoute permission="adjust_stock"><StockDashboard /></PermissionRoute>} />
-            <Route path="stock/history" element={<PermissionRoute permission="view_stock_history"><StockDashboard /></PermissionRoute>} />
-            <Route path="stock/returns" element={<PermissionRoute permission="view_returns"><VendorList defaultView="returns" /></PermissionRoute>} />
-            <Route path="stock/destroy" element={<PermissionRoute permission="destroy_stock"><StockDashboard /></PermissionRoute>} />
-            <Route path="borrow" element={<PermissionRoute permission="view_borrow"><BorrowLedger /></PermissionRoute>} />
-            <Route path="reports" element={<PermissionRoute permission="view_reports"><Reports /></PermissionRoute>} />
-            <Route path="staff" element={<PermissionRoute permission="manage_users"><StaffList /></PermissionRoute>} />
-            <Route path="billing" element={<PermissionRoute permission="view_billing"><Billing /></PermissionRoute>} />
-            <Route path="notifications" element={<PermissionRoute permission="view_notifications"><NotificationHistory /></PermissionRoute>} />
-            <Route path="activity-logs" element={<PermissionRoute permission="view_activity_logs"><ActivityLogs /></PermissionRoute>} />
+          {/* Protected Super Admin Platform Routes */}
+          <Route element={<ProtectedRoute allowedRoles={['Super Admin']} />}>
+            <Route path="/superadmin" element={<SuperAdminDashboard />} />
+            <Route path="/superadmin/stores" element={<StoreManagement />} />
           </Route>
-        </Route>
-      </Routes>
+
+          {/* Protected ERP Modules Routes */}
+          <Route element={<ProtectedRoute allowedRoles={['Super Admin', 'Admin', 'Sales Manager', 'Purchase Manager', 'Employee', 'Purchase Employee', 'Sales Employee']} />}>
+            <Route path="/dashboard" element={<MainLayout />}>
+              <Route index element={<PermissionRoute permission="view_dashboard"><Dashboard /></PermissionRoute>} />
+              <Route path="products" element={<PermissionRoute permission="view_products"><ProductList /></PermissionRoute>} />
+              <Route path="categories" element={<PermissionRoute permission="view_categories"><CategoryList /></PermissionRoute>} />
+              <Route path="vendors" element={<PermissionRoute permission="view_vendors"><VendorList /></PermissionRoute>} />
+              <Route path="customers" element={<PermissionRoute permission="manage_customers"><CustomerList /></PermissionRoute>} />
+              <Route path="purchase" element={<Navigate to="/dashboard/purchase/orders" replace />} />
+              <Route path="purchase/orders" element={<PermissionRoute permission="view_purchases"><StockDashboard /></PermissionRoute>} />
+              <Route path="sales" element={<PermissionRoute permission="view_sales"><SalesList /></PermissionRoute>} />
+              <Route path="sales/returns" element={<PermissionRoute permission="view_sales"><SalesReturn /></PermissionRoute>} />
+              <Route path="sales-dashboard" element={<PermissionRoute permission="view_sales"><SalesDashboard /></PermissionRoute>} />
+              <Route path="stock" element={<PermissionRoute permission="view_stock"><StockDashboard /></PermissionRoute>} />
+              <Route path="stock/in" element={<Navigate to="/dashboard/stock" replace />} />
+              <Route path="stock/out" element={<Navigate to="/dashboard/stock" replace />} />
+              <Route path="stock/adjustment" element={<PermissionRoute permission="adjust_stock"><StockDashboard /></PermissionRoute>} />
+              <Route path="stock/history" element={<Navigate to="/dashboard/stock" replace />} />
+              <Route path="stock/returns" element={<PermissionRoute permission="view_returns"><VendorList defaultView="returns" /></PermissionRoute>} />
+              <Route path="stock/destroy" element={<PermissionRoute permission="destroy_stock"><StockDashboard /></PermissionRoute>} />
+              <Route path="borrow" element={<PermissionRoute permission="view_borrow"><BorrowLedger /></PermissionRoute>} />
+              <Route path="reports" element={<PermissionRoute permission="view_reports"><Reports /></PermissionRoute>} />
+              <Route path="staff" element={<PermissionRoute permission="manage_users"><StaffList /></PermissionRoute>} />
+              <Route path="billing" element={<PermissionRoute permission="view_billing"><Billing /></PermissionRoute>} />
+              <Route path="notifications" element={<PermissionRoute permission="view_notifications"><NotificationHistory /></PermissionRoute>} />
+              <Route path="activity-logs" element={<PermissionRoute permission="view_activity_logs"><ActivityLogs /></PermissionRoute>} />
+            </Route>
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

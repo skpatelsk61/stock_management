@@ -92,11 +92,17 @@ CREATE TABLE IF NOT EXISTS sub_categories (
 -- 5c. Brands Table
 CREATE TABLE IF NOT EXISTS brands (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL UNIQUE,
+  name VARCHAR(255) NOT NULL,
+  category_id INT NULL,
+  sub_category_id INT NULL,
   status ENUM('Active', 'Inactive') DEFAULT 'Active',
   description TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_brands_category (category_id),
+  INDEX idx_brands_sub_category (sub_category_id),
+  FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
+  FOREIGN KEY (sub_category_id) REFERENCES sub_categories(id) ON DELETE SET NULL
 );
 
 -- 6. Suppliers / Vendors Table

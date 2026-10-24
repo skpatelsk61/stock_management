@@ -90,12 +90,15 @@ export const ensureTenantMigrations = async (dbName) => {
  */
 export const initializeTenantPools = async () => {
   try {
+    const [allDbs] = await masterPool.query('SHOW DATABASES');
+    const existingDbs = new Set(allDbs.map(d => Object.values(d)[0]));
+
     const [tenants] = await masterPool.query('SELECT database_name FROM tenants');
-    console.log(`[Registry] Pre-loading connection pools for ${tenants.length} tenant(s)...`);
-    for (const tenant of tenants) {
-      if (tenant.database_name) {
-        getTenantPool(tenant.database_name);
-      }
+    const validTenants = tenants.filter(t => t.database_name && existingDbs.has(t.database_name));
+
+    console.log(`[Registry] Pre-loading connection pools for ${validTenants.length} active tenant(s)...`);
+    for (const tenant of validTenants) {
+      getTenantPool(tenant.database_name);
     }
     console.log('[Registry] All tenant pools successfully loaded.');
   } catch (error) {

@@ -261,8 +261,9 @@ const Header = ({ onOpenShortcuts }) => {
   useEffect(() => {
     dispatch(fetchNotificationsThunk({ limit: 50 }));
     const interval = setInterval(() => {
+      if (document.hidden) return;
       dispatch(fetchNotificationsThunk({ limit: 50 }));
-    }, 15000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [dispatch]);
 
@@ -306,7 +307,7 @@ const Header = ({ onOpenShortcuts }) => {
     if (mod === 'sales' || type.includes('sale')) {
       navigate('/dashboard/sales');
     } else if (mod === 'purchases' || type.includes('purchase')) {
-      navigate('/dashboard/purchase');
+      navigate('/dashboard/purchase/orders');
     } else if (mod === 'inventory' || mod === 'stock' || type.includes('stock')) {
       navigate('/dashboard/products');
     } else if (mod === 'billing') {

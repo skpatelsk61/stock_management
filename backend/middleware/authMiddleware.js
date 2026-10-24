@@ -3,6 +3,14 @@ import { ensureTenantMigrations, getTenantPool, masterPool } from '../config/ten
 import { createNotification } from '../services/notificationService.js';
 import { requestContext } from '../utils/context.js';
 
+// High-performance in-memory cache for auth profiles and permissions (60 seconds TTL)
+const authProfileCache = new Map();
+const AUTH_CACHE_TTL_MS = 60 * 1000;
+
+export const clearAuthCache = () => {
+  authProfileCache.clear();
+};
+
 export const protect = async (req, res, next) => {
   try {
     let token;
@@ -17,6 +25,39 @@ export const protect = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'kirana_store_erp_premium_secure_jwt_secret_key_2026');
     
+    const tenantIdHeader = req.headers['x-tenant-id'] || req.query?.tenantId || req.query?.tenant_id || req.body?.tenant_id || req.body?.tenantId;
+    const cacheKey = `${decoded.id}_${decoded.role}_${tenantIdHeader || ''}_${decoded.tenantDbName || ''}`;
+
+    const cached = authProfileCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && cached.expiresAt > now) {
+      req.db = cached.db;
+      req.user = cached.user;
+      req.tenantId = cached.effectiveTenantId;
+      req.tenantDbName = cached.tenantDbName;
+
+      // Strict Enterprise Read-Only Enforcement for Super Admin in Monitoring Mode
+      if (req.user.role === 'Super Admin') {
+        const isWriteMethod = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method);
+        const url = req.originalUrl || req.url || '';
+        const isExempt = url.includes('/api/superadmin') || 
+                         url.includes('/api/auth/switch-tenant') || 
+                         url.includes('/api/auth/exit-monitoring') ||
+                         url.includes('/api/auth/login') ||
+                         url.includes('/api/auth/logout');
+
+        if (isWriteMethod && !isExempt) {
+          return res.status(403).json({
+            success: false,
+            message: 'Read-Only Monitoring Mode: You do not have permission to modify tenant data.'
+          });
+        }
+      }
+
+      return requestContext.run(req, () => next());
+    }
+
     let tenantDbName = decoded.tenantDbName || 'kirana_erp_master';
     let db = null;
     let user = null;
@@ -298,6 +339,17 @@ export const protect = async (req, res, next) => {
         }
       }
     }
+    // Cache resolved auth context
+    if (authProfileCache.size > 2000) {
+      authProfileCache.clear();
+    }
+    authProfileCache.set(cacheKey, {
+      user: { ...user },
+      db,
+      effectiveTenantId,
+      tenantDbName,
+      expiresAt: Date.now() + AUTH_CACHE_TTL_MS
+    });
 
     return requestContext.run(req, () => next());
   } catch (error) {
@@ -431,7 +483,14 @@ export const checkPermission = (permissionName) => {
         }
       }
 
-      // 1. Check permission via role_permissions mapping
+      // Fast-Path: In-memory check on permissions already resolved in protect
+      if (req.user?.permissions && Array.isArray(req.user.permissions)) {
+        if (req.user.permissions.includes(permissionName) || req.user.permissions.includes('all')) {
+          return next();
+        }
+      }
+
+      // 1. Fallback check permission via role_permissions mapping
       const [rolePerms] = await req.db.query(
         `SELECT p.name 
          FROM role_permissions rp 

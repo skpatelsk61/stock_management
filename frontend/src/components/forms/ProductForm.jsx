@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { 
   BuildingStorefrontIcon, 
   XMarkIcon,
@@ -6,6 +7,89 @@ import {
   PlusCircleIcon
 } from '@heroicons/react/24/outline';
 import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
+
+const UNIT_SUFFIX_MAP = {
+  'Kg': 'kg',
+  'Grams': 'g',
+  'Litre': 'L',
+  'Ml': 'ml',
+  'Packet': 'Packet',
+  'Bottle': 'Bottle',
+  'Box': 'Box',
+  'Sachet': 'Sachet',
+  'Piece': 'Pcs',
+  'Carton': 'Carton',
+  'Dozen': 'Dozen',
+  'Meter': 'm'
+};
+
+const PREDEFINED_WEIGHTS = {
+  'Kg': ['500 g', '1 kg', '2 kg', '5 kg', '10 kg', '25 kg'],
+  'Grams': ['50 g', '100 g', '250 g', '500 g', '1 kg'],
+  'Litre': ['250 ml', '500 ml', '1 L', '2 L', '5 L'],
+  'Ml': ['50 ml', '100 ml', '200 ml', '250 ml', '500 ml', '750 ml'],
+  'Piece': ['1 Pcs', '2 Pcs', '5 Pcs', '10 Pcs', '25 Pcs'],
+  'Packet': ['1 Packet', '2 Packet', '5 Packet', '10 Packet'],
+  'Bottle': ['1 Bottle', '2 Bottle', '5 Bottle'],
+  'Box': ['1 Box', '2 Box', '5 Box', '10 Box'],
+  'Carton': ['1 Carton', '5 Carton', '10 Carton'],
+  'Dozen': ['1 Dozen', '2 Dozen', '5 Dozen'],
+  'Meter': ['1 m', '2 m', '5 m', '10 m'],
+  'Sachet': ['1 Sachet', '5 Sachet', '10 Sachet']
+};
+
+const extractNumber = (str) => {
+  if (!str) return '';
+  const m = String(str).match(/([0-9]+(?:\.[0-9]+)?)/);
+  return m ? m[1] : '';
+};
+
+const getStoredCustomWeights = (unit) => {
+  try {
+    const raw = localStorage.getItem('kirana_custom_weights');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed[unit]) ? parsed[unit] : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveCustomWeightToStorage = (unit, weightStr) => {
+  try {
+    const raw = localStorage.getItem('kirana_custom_weights');
+    const parsed = raw ? JSON.parse(raw) : {};
+    const existing = Array.isArray(parsed[unit]) ? parsed[unit] : [];
+    if (!existing.includes(weightStr)) {
+      parsed[unit] = [...existing, weightStr];
+      localStorage.setItem('kirana_custom_weights', JSON.stringify(parsed));
+    }
+  } catch (e) {
+    console.error('Failed to save custom weight to localStorage:', e);
+  }
+};
+
+const removeCustomWeightFromStorage = (unit, weightStr) => {
+  try {
+    const raw = localStorage.getItem('kirana_custom_weights');
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (Array.isArray(parsed[unit])) {
+      parsed[unit] = parsed[unit].filter(w => w !== weightStr);
+      localStorage.setItem('kirana_custom_weights', JSON.stringify(parsed));
+    }
+  } catch (e) {
+    console.error('Failed to remove custom weight from localStorage:', e);
+  }
+};
+
+// Module-level cache for master data to enable instant modal open
+let cachedProductMasters = null;
+let lastProductMastersTime = 0;
+
+export const invalidateProductMastersCache = () => {
+  cachedProductMasters = null;
+  lastProductMastersTime = 0;
+};
 
 const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = false }) => {
   
@@ -33,17 +117,42 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
   };
 
   const [formData, setFormData] = useState({ ...defaultState });
+  const [selectedWeights, setSelectedWeights] = useState([]);
+  const [customWeights, setCustomWeights] = useState(() => getStoredCustomWeights('Packet'));
+  const [isWeightDropdownOpen, setIsWeightDropdownOpen] = useState(false);
+  const [customWeightInput, setCustomWeightInput] = useState('');
+  const weightDropdownRef = useRef(null);
   const [errors, setErrors] = useState({});
-  const [dbCategories, setDbCategories] = useState([]);
-  const [dbSubCategories, setDbSubCategories] = useState([]);
-  const [dbBrands, setDbBrands] = useState([]);
-  const [loadingMasters, setLoadingMasters] = useState(true);
+  const [dbCategories, setDbCategories] = useState(() => cachedProductMasters?.categories || (categories.length ? categories : []));
+  const [dbSubCategories, setDbSubCategories] = useState(() => cachedProductMasters?.subCategories || []);
+  const [dbBrands, setDbBrands] = useState(() => cachedProductMasters?.brands || []);
+  const [loadingMasters, setLoadingMasters] = useState(() => !cachedProductMasters && !categories.length);
   const [masterFetchError, setMasterFetchError] = useState(null);
   const [isCustomSubCategory, setIsCustomSubCategory] = useState(false);
   const [isCustomBrand, setIsCustomBrand] = useState(false);
 
-  const fetchMasters = async () => {
-    setLoadingMasters(true);
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (weightDropdownRef.current && !weightDropdownRef.current.contains(event.target)) {
+        setIsWeightDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const fetchMasters = async (force = false) => {
+    if (!force && cachedProductMasters && (Date.now() - lastProductMastersTime < 120000)) {
+      setDbCategories(cachedProductMasters.categories);
+      setDbSubCategories(cachedProductMasters.subCategories);
+      setDbBrands(cachedProductMasters.brands);
+      setLoadingMasters(false);
+      return;
+    }
+
+    if (!cachedProductMasters) setLoadingMasters(true);
     setMasterFetchError(null);
     try {
       const [catRes, subRes, brandRes] = await Promise.all([
@@ -54,12 +163,16 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       const cats = catRes.success ? (catRes.categories || []) : [];
       const subs = subRes.success ? (subRes.subCategories || []) : [];
       const brands = brandRes.success ? (brandRes.brands || []) : [];
+
+      cachedProductMasters = { categories: cats, subCategories: subs, brands: brands };
+      lastProductMastersTime = Date.now();
+
       setDbCategories(cats);
       setDbSubCategories(subs);
       setDbBrands(brands);
     } catch (err) {
       console.error('Failed to load ProductForm dropdown masters:', err);
-      setMasterFetchError('Failed to load master dropdown data from server.');
+      if (!cachedProductMasters) setMasterFetchError('Failed to load master dropdown data from server.');
     } finally {
       setLoadingMasters(false);
     }
@@ -79,6 +192,30 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
   const activeSubCategories = selectedCatObj
     ? dbSubCategories.filter(s => String(s.category_id) === String(selectedCatObj.id))
     : [];
+
+  // Active Brands belonging to selected Category & Sub Category
+  const activeBrands = useMemo(() => {
+    if (!formData.category_id && !formData.category) return [];
+    return dbBrands.filter(b => {
+      // Keep currently selected brand in edit mode
+      if (formData.brand_id && String(b.id) === String(formData.brand_id)) return true;
+      if (formData.brand && b.name.toLowerCase() === formData.brand.toLowerCase()) return true;
+
+      // Filter by sub_category_id if selected
+      if (formData.sub_category_id && b.sub_category_id) {
+        return String(b.sub_category_id) === String(formData.sub_category_id);
+      }
+      // If brand only has category_id
+      if (formData.category_id && b.category_id && !b.sub_category_id) {
+        return String(b.category_id) === String(formData.category_id);
+      }
+      // Legacy brands without category/subcategory
+      if (!b.category_id && !b.sub_category_id) {
+        return true;
+      }
+      return false;
+    });
+  }, [dbBrands, formData.category_id, formData.category, formData.sub_category_id, formData.brand_id, formData.brand]);
 
   // Parse incoming product props and pre-fill form
   useEffect(() => {
@@ -111,20 +248,33 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       setFormData({
         ...defaultState,
         ...product,
+        name: product.name || '',
         category: catName,
         category_id: catId,
         sub_category: subName,
         sub_category_id: subId,
         brand: brandName,
         brand_id: brandId,
+        unit: product.unit || 'Packet',
         measurement_value: product.measurement_value || '',
+        description: product.description || '',
+        image: product.image || '📦',
         purchasePrice: product.purchasePrice ?? product.purchase_price ?? '',
         sellingPrice: product.sellingPrice ?? product.selling_price ?? '',
+        mrp: product.mrp ?? product.max_retail_price ?? '',
+        gst: product.gst !== undefined && product.gst !== null ? String(product.gst) : '0',
+        openingStock: product.openingStock ?? product.opening_stock ?? '0',
         minimumStock: product.minimumStock ?? product.min_stock ?? '5',
         maximumStock: product.maximumStock ?? product.max_stock ?? '100',
         manufacturingDate: product.manufacturingDate ?? (product.manufacturing_date ? product.manufacturing_date.substring(0, 10) : ''),
         expiryDate: product.expiryDate ?? (product.expiry_date ? product.expiry_date.substring(0, 10) : ''),
       });
+      const allExistingWeights = (product.existingVariants && product.existingVariants.length > 0)
+        ? product.existingVariants.map(v => v.measurement_value).filter(Boolean)
+        : (product.measurement_value ? [product.measurement_value] : []);
+      setSelectedWeights(allExistingWeights);
+      setCustomWeights(getStoredCustomWeights(product.unit || 'Packet'));
+      setCustomWeightInput('');
 
       if (subName && !subMatch && dbSubCategories.length > 0) {
         setIsCustomSubCategory(true);
@@ -139,6 +289,9 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       }
     } else {
       setFormData(defaultState);
+      setSelectedWeights([]);
+      setCustomWeights(getStoredCustomWeights(defaultState.unit));
+      setCustomWeightInput('');
       setIsCustomBrand(false);
       setIsCustomSubCategory(false);
     }
@@ -156,24 +309,33 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
         category_id: selectedCat ? selectedCat.id : '',
         sub_category: '',
         sub_category_id: '',
+        brand: '',
+        brand_id: ''
       }));
       setIsCustomSubCategory(false);
+      setIsCustomBrand(false);
     } else if (name === 'sub_category_id' || name === 'sub_category') {
       if (value === 'Custom') {
         setIsCustomSubCategory(true);
         setFormData((prev) => ({ 
           ...prev, 
           sub_category: '',
-          sub_category_id: ''
+          sub_category_id: '',
+          brand: '',
+          brand_id: ''
         }));
+        setIsCustomBrand(false);
       } else {
         setIsCustomSubCategory(false);
         const selectedSub = dbSubCategories.find(s => String(s.id) === String(value) || s.name === value);
         setFormData((prev) => ({ 
           ...prev, 
           sub_category: selectedSub ? selectedSub.name : value,
-          sub_category_id: selectedSub ? selectedSub.id : ''
+          sub_category_id: selectedSub ? selectedSub.id : '',
+          brand: '',
+          brand_id: ''
         }));
+        setIsCustomBrand(false);
       }
     } else if (name === 'customSubCategory') {
       setFormData((prev) => ({ ...prev, sub_category: value, sub_category_id: '' }));
@@ -196,6 +358,16 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       }
     } else if (name === 'customBrand') {
       setFormData((prev) => ({ ...prev, brand: value, brand_id: '' }));
+    } else if (name === 'unit') {
+      const newUnit = value;
+      setFormData((prev) => ({ 
+        ...prev, 
+        unit: newUnit,
+        measurement_value: ''
+      }));
+      setSelectedWeights([]);
+      setCustomWeights(getStoredCustomWeights(newUnit));
+      setCustomWeightInput('');
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
@@ -205,11 +377,84 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
     }
   };
 
+  const handleToggleWeight = (weightStr) => {
+    setSelectedWeights(prev => {
+      const exists = prev.includes(weightStr);
+      const next = exists
+        ? prev.filter(w => w !== weightStr)
+        : [...prev, weightStr];
+      setFormData(fd => ({
+        ...fd,
+        measurement_value: next[0] || ''
+      }));
+      return next;
+    });
+  };
+
+  const handleAddCustomWeight = () => {
+    const raw = customWeightInput.trim();
+    if (!raw) return;
+    const currentUnit = formData.unit || 'Packet';
+    const suffix = UNIT_SUFFIX_MAP[currentUnit] || currentUnit;
+    let formatted = raw;
+    if (/^[0-9]+(?:\.[0-9]+)?$/.test(raw)) {
+      formatted = `${raw} ${suffix}`;
+    } else if (!raw.toLowerCase().includes(suffix.toLowerCase())) {
+      formatted = `${raw} ${suffix}`;
+    }
+
+    saveCustomWeightToStorage(currentUnit, formatted);
+
+    if (!customWeights.includes(formatted)) {
+      setCustomWeights(prev => [...prev, formatted]);
+    }
+    if (!selectedWeights.includes(formatted)) {
+      setSelectedWeights(prev => {
+        const next = [...prev, formatted];
+        setFormData(fd => ({ ...fd, measurement_value: next[0] || '' }));
+        return next;
+      });
+    }
+    setCustomWeightInput('');
+    toast.success(`Custom weight "${formatted}" saved to dropdown`);
+  };
+
+  const handleDeleteCustomWeight = (e, weightToRemove) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const currentUnit = formData.unit || 'Packet';
+    removeCustomWeightFromStorage(currentUnit, weightToRemove);
+    setCustomWeights(prev => prev.filter(w => w !== weightToRemove));
+    setSelectedWeights(prev => prev.filter(w => w !== weightToRemove));
+  };
+
+  const currentUnit = formData.unit || 'Packet';
+  const baseOptions = PREDEFINED_WEIGHTS[currentUnit] || ['1 ' + currentUnit, '2 ' + currentUnit, '5 ' + currentUnit];
+  const allAvailableWeights = useMemo(() => {
+    const list = [...baseOptions];
+    customWeights.forEach(cw => {
+      if (!list.includes(cw)) list.push(cw);
+    });
+    selectedWeights.forEach(sw => {
+      if (!list.includes(sw)) list.push(sw);
+    });
+    return list;
+  }, [baseOptions, customWeights, selectedWeights]);
+
   const handleReset = () => {
     if (product) {
+      const allExistingWeights = (product.existingVariants && product.existingVariants.length > 0)
+        ? product.existingVariants.map(v => v.measurement_value).filter(Boolean)
+        : (product.measurement_value ? [product.measurement_value] : []);
       setFormData({ ...defaultState, ...product });
+      setSelectedWeights(allExistingWeights);
+      setCustomWeights(getStoredCustomWeights(product.unit || 'Packet'));
+      setCustomWeightInput('');
     } else {
       setFormData(defaultState);
+      setSelectedWeights([]);
+      setCustomWeights(getStoredCustomWeights(defaultState.unit));
+      setCustomWeightInput('');
       setIsCustomBrand(false);
       setIsCustomSubCategory(false);
     }
@@ -234,6 +479,9 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
     onSubmit({
       ...formData,
       openingStock: formData.openingStock || '0',
+      measurement_value: selectedWeights[0] || formData.measurement_value || '',
+      weights: selectedWeights,
+      existingVariants: product?.existingVariants || []
     });
   };
 
@@ -293,6 +541,158 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                   <option value="Dozen">Dozen</option>
                   <option value="Meter">Meter</option>
                 </select>
+              </div>
+
+              {/* Weight / Size (Multi-select dropdown with checkboxes + custom option) */}
+              <div className="relative" ref={weightDropdownRef}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest">
+                    Weight / Size
+                  </label>
+                  {selectedWeights.length > 0 && (
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                      {selectedWeights.length} variant{selectedWeights.length > 1 ? 's' : ''} selected
+                    </span>
+                  )}
+                </div>
+
+                {/* Dropdown Trigger Box */}
+                <div
+                  onClick={() => setIsWeightDropdownOpen((prev) => !prev)}
+                  className="w-full min-h-[38px] px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between cursor-pointer hover:border-emerald-500 transition-all focus:border-emerald-500"
+                >
+                  <div className="flex flex-wrap gap-1 items-center flex-1 pr-2">
+                    {selectedWeights.length === 0 ? (
+                      <span className="text-slate-400 font-semibold">
+                        Select {formData.unit} weight(s) or add custom...
+                      </span>
+                    ) : (
+                      selectedWeights.map((w) => (
+                        <span
+                          key={w}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-xs"
+                        >
+                          {w}
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleWeight(w);
+                            }}
+                            className="hover:text-rose-600 dark:hover:text-rose-400 text-xs font-black cursor-pointer ml-0.5 px-0.5"
+                            title="Remove weight"
+                          >
+                            ×
+                          </span>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-400 select-none">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                      {formData.unit}
+                    </span>
+                    <span className={`text-[10px] transition-transform duration-200 ${isWeightDropdownOpen ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                  </div>
+                </div>
+
+                {/* Dropdown Menu */}
+                {isWeightDropdownOpen && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-h-72 overflow-y-auto">
+                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Pre-defined {formData.unit} Weights
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        Check to select / Uncheck to remove
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2.5">
+                      {allAvailableWeights.map((w) => {
+                        const isChecked = selectedWeights.includes(w);
+                        const isCustom = !baseOptions.includes(w);
+                        return (
+                          <label
+                            key={w}
+                            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border select-none ${
+                              isChecked
+                                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 shadow-xs'
+                                : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleWeight(w)}
+                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                              />
+                              <span className="truncate">{w}</span>
+                            </div>
+                            {isCustom && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteCustomWeight(e, w)}
+                                title="Remove custom weight"
+                                className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-0.5 rounded text-[11px] leading-none ml-1 cursor-pointer font-bold"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Weight / Size input inside dropdown */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                        + Custom Weight / Size:
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 overflow-hidden focus-within:border-emerald-500">
+                          <input
+                            type="text"
+                            value={customWeightInput}
+                            onChange={(e) => setCustomWeightInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddCustomWeight();
+                              }
+                            }}
+                            placeholder="Enter value (e.g. 15)"
+                            className="w-full px-3 py-1.5 text-xs bg-transparent font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
+                          />
+                          <div className="flex items-center px-2.5 bg-slate-100 dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-500 select-none">
+                            {UNIT_SUFFIX_MAP[formData.unit] || formData.unit}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddCustomWeight}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+                        >
+                          + Add
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Selected weights summary */}
+                {selectedWeights.length > 0 && (
+                  <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <span>✓</span>
+                    <span>
+                      {selectedWeights.length === 1
+                        ? `Weight variant: ${selectedWeights[0]}`
+                        : `${selectedWeights.length} variants will be created (${selectedWeights.join(', ')}) under this product.`}
+                    </span>
+                  </div>
+                )}
               </div>
 
 
@@ -406,14 +806,24 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                   name="brand_select"
                   value={isCustomBrand ? 'Custom' : (formData.brand_id || (dbBrands.find(b => b.name === formData.brand)?.id || ''))}
                   onChange={handleChange}
-                  disabled={loadingMasters}
+                  disabled={loadingMasters || (!formData.category_id && !formData.category)}
                   className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 outline-none cursor-pointer disabled:opacity-50 ${errors.brand ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200 dark:border-slate-850'}`}
                 >
-                  <option value="">Select Brand</option>
-                  {dbBrands.map((br) => (
+                  {!formData.category_id && !formData.category ? (
+                    <option value="">Select Main Category First</option>
+                  ) : !formData.sub_category_id && !formData.sub_category ? (
+                    <option value="">Select Sub Category First</option>
+                  ) : activeBrands.length === 0 ? (
+                    <option value="" disabled>No Brands Available for this Sub Category</option>
+                  ) : (
+                    <option value="">Select Brand</option>
+                  )}
+                  {activeBrands.map((br) => (
                     <option key={br.id} value={br.id}>{br.name}</option>
                   ))}
-                  <option value="Custom">+ Add Custom Brand...</option>
+                  {(formData.category_id || formData.category) && (
+                    <option value="Custom">+ Add Custom Brand...</option>
+                  )}
                 </select>
                 {errors.brand && <p className="text-[10px] font-bold text-rose-600 mt-1">{errors.brand}</p>}
 
@@ -478,7 +888,7 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
               <label className="block text-[10px] font-black text-slate-550 dark:text-slate-400 uppercase tracking-widest mb-1">Product Description Notes</label>
               <textarea
                 name="description"
-                value={formData.description}
+                value={formData.description || ''}
                 onChange={handleChange}
                 rows="2"
                 placeholder="Enter dynamic storage instructions, pack benefits, or description notes..."

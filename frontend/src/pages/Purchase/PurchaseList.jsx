@@ -95,21 +95,38 @@ const PurchaseList = () => {
       }
     };
     fetchSettings();
-    const handleEventUpdate = () => {
-      fetchPurchases();
-      fetchSettings();
+
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchPurchases();
+        fetchSettings();
+      }, 350);
     };
-    window.addEventListener('focus', handleEventUpdate);
-    window.addEventListener('purchase-updated', handleEventUpdate);
-    window.addEventListener('vendor-updated', handleEventUpdate);
-    window.addEventListener('stock-changed', handleEventUpdate);
-    window.addEventListener('inventory-updated', handleEventUpdate);
+
+    const handleFocusSync = () => {
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        fetchPurchases();
+        fetchSettings();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    window.addEventListener('purchase-updated', handleDebouncedUpdate);
+    window.addEventListener('vendor-updated', handleDebouncedUpdate);
+    window.addEventListener('stock-changed', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
     return () => {
-      window.removeEventListener('focus', handleEventUpdate);
-      window.removeEventListener('purchase-updated', handleEventUpdate);
-      window.removeEventListener('vendor-updated', handleEventUpdate);
-      window.removeEventListener('stock-changed', handleEventUpdate);
-      window.removeEventListener('inventory-updated', handleEventUpdate);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocusSync);
+      window.removeEventListener('purchase-updated', handleDebouncedUpdate);
+      window.removeEventListener('vendor-updated', handleDebouncedUpdate);
+      window.removeEventListener('stock-changed', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
     };
   }, []);
 

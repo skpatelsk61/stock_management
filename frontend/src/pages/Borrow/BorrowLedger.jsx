@@ -19,7 +19,8 @@ import {
   ExclamationCircleIcon,
   DocumentTextIcon,
   ChevronLeftIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  UserPlusIcon
 } from '@heroicons/react/24/outline';
 import API, { settingsAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
@@ -60,6 +61,14 @@ const BorrowLedger = () => {
   // Modal states
   const [showTxModal, setShowTxModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustForm, setNewCustForm] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    notes: ''
+  });
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
   
   // Search & Filter Tabs
   const [searchTerm, setSearchTerm] = useState('');
@@ -111,16 +120,62 @@ const BorrowLedger = () => {
 
   // Keyboard escape handler for modals
   useEffect(() => {
-    if (!showTxModal && !showHistoryModal) return;
+    if (!showTxModal && !showHistoryModal && !showAddCustomerModal) return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setShowTxModal(false);
         setShowHistoryModal(false);
+        setShowAddCustomerModal(false);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showTxModal, showHistoryModal]);
+  }, [showTxModal, showHistoryModal, showAddCustomerModal]);
+
+  // Create New Borrow Customer
+  const handleCreateCustomerSubmit = async (e) => {
+    e.preventDefault();
+    const cleanedPhone = (newCustForm.phone || '').replace(/\D/g, '');
+    if (!newCustForm.name.trim()) {
+      dispatch(showToast({ message: 'Customer full name is required', type: 'error' }));
+      return;
+    }
+    if (cleanedPhone.length !== 10) {
+      dispatch(showToast({ message: 'Mobile number must be exactly 10 digits', type: 'error' }));
+      return;
+    }
+
+    try {
+      setIsCreatingCustomer(true);
+      const res = await API.post('/customers', {
+        name: newCustForm.name.trim(),
+        phone: cleanedPhone,
+        address: newCustForm.address.trim() || null,
+        notes: newCustForm.notes.trim() || null,
+        customer_type: 'Borrow',
+        status: 'Active',
+        payment_mode: 'Credit / Udhaar'
+      });
+
+      if (res.data?.success) {
+        dispatch(showToast({ message: `Borrow customer "${newCustForm.name.trim()}" registered successfully!`, type: 'success' }));
+        setShowAddCustomerModal(false);
+        setNewCustForm({ name: '', phone: '', address: '', notes: '' });
+        await loadSummary(true);
+        window.dispatchEvent(new CustomEvent('customer-updated'));
+        window.dispatchEvent(new CustomEvent('borrow-updated'));
+        try {
+          localStorage.setItem('sales_sync_signal', Date.now().toString());
+        } catch (err) {}
+      } else {
+        dispatch(showToast({ message: res.data?.message || 'Failed to create customer', type: 'error' }));
+      }
+    } catch (err) {
+      dispatch(showToast({ message: err.response?.data?.message || err.message || 'Error creating borrow customer', type: 'error' }));
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
 
   // Load summary
   const loadSummary = async (isSilent = false) => {
@@ -165,20 +220,33 @@ const BorrowLedger = () => {
   useEffect(() => {
     loadSummary();
 
-    const handleEventUpdate = () => {
-      loadSummary(true);
+    let debounceTimer = null;
+    let lastFocusSync = Date.now();
+
+    const handleDebouncedUpdate = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadSummary(true);
+      }, 350);
     };
 
-    window.addEventListener('focus', handleEventUpdate);
-    window.addEventListener('sales-updated', handleEventUpdate);
-    window.addEventListener('borrow-updated', handleEventUpdate);
-    window.addEventListener('customer-updated', handleEventUpdate);
-    window.addEventListener('stock-changed', handleEventUpdate);
-    window.addEventListener('inventory-updated', handleEventUpdate);
+    const handleFocusSync = () => {
+      if (Date.now() - lastFocusSync > 60000) {
+        lastFocusSync = Date.now();
+        loadSummary(true);
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    window.addEventListener('sales-updated', handleDebouncedUpdate);
+    window.addEventListener('borrow-updated', handleDebouncedUpdate);
+    window.addEventListener('customer-updated', handleDebouncedUpdate);
+    window.addEventListener('stock-changed', handleDebouncedUpdate);
+    window.addEventListener('inventory-updated', handleDebouncedUpdate);
 
     const handleStorage = (e) => {
       if (e.key === 'sales_sync_signal') {
-        loadSummary(true);
+        handleDebouncedUpdate();
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -187,15 +255,16 @@ const BorrowLedger = () => {
       if (document.visibilityState === 'visible') {
         loadSummary(true);
       }
-    }, 8000);
+    }, 30000);
 
     return () => {
-      window.removeEventListener('focus', handleEventUpdate);
-      window.removeEventListener('sales-updated', handleEventUpdate);
-      window.removeEventListener('borrow-updated', handleEventUpdate);
-      window.removeEventListener('customer-updated', handleEventUpdate);
-      window.removeEventListener('stock-changed', handleEventUpdate);
-      window.removeEventListener('inventory-updated', handleEventUpdate);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocusSync);
+      window.removeEventListener('sales-updated', handleDebouncedUpdate);
+      window.removeEventListener('borrow-updated', handleDebouncedUpdate);
+      window.removeEventListener('customer-updated', handleDebouncedUpdate);
+      window.removeEventListener('stock-changed', handleDebouncedUpdate);
+      window.removeEventListener('inventory-updated', handleDebouncedUpdate);
       window.removeEventListener('storage', handleStorage);
       clearInterval(interval);
     };
@@ -614,7 +683,16 @@ const BorrowLedger = () => {
 
           {!isReadOnly && (
             <>
-              
+              <button
+                onClick={() => {
+                  setNewCustForm({ name: '', phone: '', address: '', notes: '' });
+                  setShowAddCustomerModal(true);
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-900/20 transition-all cursor-pointer active:scale-95"
+              >
+                <UserPlusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                + New Borrow Customer
+              </button>
 
               <button
                 onClick={() => handleOpenTx(null, 'PAYBACK')}
@@ -1324,6 +1402,129 @@ const BorrowLedger = () => {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── ADD NEW BORROW CUSTOMER MODAL ─── */}
+      <AnimatePresence>
+        {showAddCustomerModal && (
+          <div
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowAddCustomerModal(false);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden my-8"
+            >
+              {/* Modal Header */}
+              <div className="bg-slate-950 px-6 py-4 flex items-center justify-between text-white border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+                    <UserPlusIcon className="w-5 h-5 stroke-[2]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
+                      New Borrow Customer
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Register a verified Udhaar / Credit account
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomerModal(false)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Form */}
+              <form onSubmit={handleCreateCustomerSubmit} className="p-6 space-y-4 text-xs font-sans">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Customer Full Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newCustForm.name}
+                    onChange={(e) => setNewCustForm({ ...newCustForm, name: e.target.value })}
+                    placeholder="Enter full name (e.g. Ramesh Sharma)"
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Mobile Number (10 Digits) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={10}
+                    value={newCustForm.phone}
+                    onChange={(e) =>
+                      setNewCustForm({
+                        ...newCustForm,
+                        phone: e.target.value.replace(/\D/g, '').slice(0, 10)
+                      })
+                    }
+                    placeholder="10-digit mobile number"
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-medium focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Address / Mohalla (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustForm.address}
+                    onChange={(e) => setNewCustForm({ ...newCustForm, address: e.target.value })}
+                    placeholder="Village, Colony, or Landmark"
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Remarks / Credit Notes (Optional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={newCustForm.notes}
+                    onChange={(e) => setNewCustForm({ ...newCustForm, notes: e.target.value })}
+                    placeholder="e.g. Monthly salary customer, trusted neighbor, etc."
+                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-indigo-500 transition-colors resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCustomerModal(false)}
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isCreatingCustomer}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-950/30 cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    {isCreatingCustomer ? 'Registering...' : 'Register Borrow Customer'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

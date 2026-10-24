@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
   PieChart,
   Pie,
   Cell,
@@ -88,6 +88,7 @@ const Dashboard = () => {
 
   const [categoryBreakdownData, setCategoryBreakdownData] = useState([]);
   const [monthlySalesTrend, setMonthlySalesTrend] = useState([]);
+  const [analysisMode, setAnalysisMode] = useState('overview'); // 'overview' | 'sales' | 'purchases' | 'inventory'
 
   const fetchDashboardData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -132,8 +133,15 @@ const Dashboard = () => {
         if (catDistList && catDistList.length > 0) {
           const colors = ['#6366F1', '#F59E0B', '#10B981', '#3B82F6', '#EC4899', '#8B5CF6'];
           const mappedDist = catDistList
-            .filter(c => Number(c.value) > 0)
-            .map((c, i) => ({ name: c.name, value: Number(c.value), color: colors[i % colors.length] }));
+            .filter(c => Number(c.value) > 0 || Number(c.sales) > 0 || Number(c.purchases) > 0 || Number(c.valuation) > 0)
+            .map((c, i) => ({
+              name: c.name,
+              value: Number(c.value || 0),
+              valuation: Number(c.valuation || 0),
+              sales: Number(c.sales || 0),
+              purchases: Number(c.purchases || 0),
+              color: colors[i % colors.length]
+            }));
           setCategoryBreakdownData(mappedDist);
         } else {
           setCategoryBreakdownData([]);
@@ -155,9 +163,38 @@ const Dashboard = () => {
       }
 
       if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
-        setMonthlySalesTrend(chartRes.charts.monthlyTrends);
+        let trends = [...chartRes.charts.monthlyTrends];
+        if (trends.length < 6) {
+          const now = new Date();
+          const full6Months = [];
+          for (let i = 5; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const mStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+            const existing = trends.find(t => t.name === mStr);
+            full6Months.push(existing || {
+              name: mStr,
+              Sales: 0,
+              Purchases: 0,
+              Profit: 0,
+              Udhar: 0,
+              GRN: 0
+            });
+          }
+          trends = full6Months;
+        }
+        setMonthlySalesTrend(trends);
       } else {
-        setMonthlySalesTrend([]);
+        const fallbackMonths = [];
+        const now = new Date();
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          fallbackMonths.push({
+            name: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+            Sales: 0,
+            Purchases: 0
+          });
+        }
+        setMonthlySalesTrend(fallbackMonths);
       }
 
       // Update Today's Store Summary KPIs
@@ -185,12 +222,18 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
+
+    let debounceTimer = null;
     const handleEventUpdate = () => {
-      fetchDashboardData(true);
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchDashboardData(true);
+      }, 400);
     };
+
     const handleStorageUpdate = (e) => {
       if (e.key === 'sales_sync_signal' || e.key === 'stock_sync_signal') {
-        fetchDashboardData(true);
+        handleEventUpdate();
       }
     };
     window.addEventListener('stock-changed', handleEventUpdate);
@@ -198,12 +241,14 @@ const Dashboard = () => {
     window.addEventListener('sales-updated', handleEventUpdate);
     window.addEventListener('storage', handleStorageUpdate);
 
-    // Auto-poll every 15 seconds for active real-time dashboard updates
+    // Auto-poll every 45 seconds if tab is visible
     const pollingInterval = setInterval(() => {
+      if (document.hidden) return;
       fetchDashboardData(true);
-    }, 15000);
+    }, 45000);
 
     return () => {
+      clearTimeout(debounceTimer);
       window.removeEventListener('stock-changed', handleEventUpdate);
       window.removeEventListener('inventory-updated', handleEventUpdate);
       window.removeEventListener('sales-updated', handleEventUpdate);
@@ -212,24 +257,144 @@ const Dashboard = () => {
     };
   }, []);
 
-  const totalCategoryProducts = useMemo(() =>
-    categoryBreakdownData.reduce((sum, item) => sum + item.value, 0),
-    [categoryBreakdownData]
-  );
+  const analysisData = useMemo(() => {
+    if (analysisMode === 'overview') {
+      const sVal = Math.max(0, Number(kpis.totalSales || 0));
+      const pVal = Math.max(0, Number(kpis.totalPurchases || 0));
+      const iVal = Math.max(0, Number(kpis.inventoryValuation || 0));
+      const total = sVal + pVal + iVal;
 
-  const categoryBreakdownWithPercentages = useMemo(() =>
-    categoryBreakdownData.map(item => ({
-      ...item,
-      percentage: totalCategoryProducts > 0 ? Math.round((item.value / totalCategoryProducts) * 100) : 0,
-    })),
-    [categoryBreakdownData, totalCategoryProducts]
-  );
+      const items = [
+        {
+          id: 'sales',
+          name: 'Sales',
+          subtitle: 'Revenue Billed',
+          value: sVal,
+          color: '#6366F1', // Indigo
+          badge: 'Revenue',
+        },
+        {
+          id: 'purchases',
+          name: 'Purchases',
+          subtitle: 'Procurement Cost',
+          value: pVal,
+          color: '#F59E0B', // Amber
+          badge: 'Expense',
+        },
+        {
+          id: 'inventory',
+          name: 'Inventory',
+          subtitle: 'Stock Valuation',
+          value: iVal,
+          color: '#10B981', // Emerald
+          badge: 'Asset',
+        },
+      ];
 
-  const topCategoryPct = useMemo(() => {
-    if (totalCategoryProducts === 0) return '0%';
-    const maxVal = Math.max(...categoryBreakdownData.map(i => i.value), 0);
-    return `${Math.round((maxVal / totalCategoryProducts) * 100)}%`;
-  }, [categoryBreakdownData, totalCategoryProducts]);
+      return {
+        mode: 'overview',
+        title: 'Sales, Purchase & Stock Analysis',
+        subtitle: 'Business Health',
+        total,
+        centerLabel: 'TOTAL FLOW',
+        centerValue: total >= 1000 ? `₹${(total / 1000).toFixed(1)}k` : `₹${Math.round(total)}`,
+        items: items.map(item => {
+          const pctNum = total > 0 ? (item.value / total) * 100 : 0;
+          return {
+            ...item,
+            pctNum,
+            percentage: total > 0 ? (pctNum < 1 && pctNum > 0 ? '<1%' : `${Math.round(pctNum)}%`) : '0%',
+          };
+        }),
+      };
+    }
+
+    if (analysisMode === 'sales') {
+      const activeCats = categoryBreakdownData.filter(c => (c.sales || 0) > 0);
+      const list = activeCats.length > 0 ? activeCats : categoryBreakdownData;
+      const total = list.reduce((sum, c) => sum + (c.sales || 0), 0);
+
+      const items = list.map(c => {
+        const pctNum = total > 0 ? ((c.sales || 0) / total) * 100 : 0;
+        return {
+          id: c.name,
+          name: c.name,
+          subtitle: `${c.value} Products`,
+          value: c.sales || 0,
+          color: c.color,
+          pctNum,
+          percentage: total > 0 ? (pctNum < 1 && pctNum > 0 ? '<1%' : `${Math.round(pctNum)}%`) : '0%',
+        };
+      });
+
+      return {
+        mode: 'sales',
+        title: 'Category Sales Breakdown',
+        subtitle: 'Sales Analysis',
+        total,
+        centerLabel: 'SALES',
+        centerValue: total >= 1000 ? `₹${(total / 1000).toFixed(1)}k` : `₹${Math.round(total)}`,
+        items,
+      };
+    }
+
+    if (analysisMode === 'purchases') {
+      const activeCats = categoryBreakdownData.filter(c => (c.purchases || 0) > 0);
+      const list = activeCats.length > 0 ? activeCats : categoryBreakdownData;
+      const total = list.reduce((sum, c) => sum + (c.purchases || 0), 0);
+
+      const items = list.map(c => {
+        const pctNum = total > 0 ? ((c.purchases || 0) / total) * 100 : 0;
+        return {
+          id: c.name,
+          name: c.name,
+          subtitle: `${c.value} Products`,
+          value: c.purchases || 0,
+          color: c.color,
+          pctNum,
+          percentage: total > 0 ? (pctNum < 1 && pctNum > 0 ? '<1%' : `${Math.round(pctNum)}%`) : '0%',
+        };
+      });
+
+      return {
+        mode: 'purchases',
+        title: 'Category Purchase Breakdown',
+        subtitle: 'Purchase Analysis',
+        total,
+        centerLabel: 'PURCHASE',
+        centerValue: total >= 1000 ? `₹${(total / 1000).toFixed(1)}k` : `₹${Math.round(total)}`,
+        items,
+      };
+    }
+
+    // inventory mode (stock valuation per category)
+    const activeCats = categoryBreakdownData.filter(c => (c.valuation || 0) > 0);
+    const list = activeCats.length > 0 ? activeCats : categoryBreakdownData;
+    const total = list.reduce((sum, c) => sum + (c.valuation || 0), 0);
+
+    const items = list.map(c => {
+      const pctNum = total > 0 ? ((c.valuation || 0) / total) * 100 : 0;
+      return {
+        id: c.name,
+        name: c.name,
+        subtitle: `${c.value} Products`,
+        value: c.valuation || 0,
+        color: c.color,
+        pctNum,
+        percentage: total > 0 ? (pctNum < 1 && pctNum > 0 ? '<1%' : `${Math.round(pctNum)}%`) : '0%',
+      };
+    });
+
+    return {
+      mode: 'inventory',
+      title: 'Category Stock Valuation',
+      subtitle: 'Inventory Analysis',
+      total,
+      centerLabel: 'STOCK',
+      centerValue: total >= 1000 ? `₹${(total / 1000).toFixed(1)}k` : `₹${Math.round(total)}`,
+      items,
+    };
+  }, [analysisMode, kpis, categoryBreakdownData]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -439,27 +604,35 @@ const Dashboard = () => {
       {/* ── CHARTS ROW ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* Sales vs Purchases Trend Chart */}
+        {/* Sales vs Purchases Trend Line Chart */}
         <motion.div
           variants={cardVariants}
-          className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:col-span-2"
+          className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:col-span-2 flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Performance</p>
-              <h2 className="text-sm font-bold text-slate-900 mt-0.5">Sales & Purchase Overview</h2>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" />Sales
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Performance</p>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-slate-900 mt-0.5">Sales & Purchase Overview</h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Line Graph
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />Purchases
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" />Sales
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />Purchases
+                </div>
               </div>
             </div>
+            <div className="h-[1px] bg-slate-100 mb-4" />
           </div>
-          <div className="h-[1px] bg-slate-100 mb-4" />
-          <div className="h-64 w-full">
+
+          <div className="h-64 sm:h-72 w-full">
             {monthlySalesTrend.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                 <ChartBarIcon className="w-10 h-10 text-slate-300 mb-2 stroke-1" />
@@ -470,22 +643,24 @@ const Dashboard = () => {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlySalesTrend} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366F1" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} axisLine={false} tickFormatter={v => `₹${v.toLocaleString('en-IN')}`} />
+                <LineChart data={monthlySalesTrend} margin={{ top: 12, right: 18, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#F1F5F9'} vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11, fill: isDarkMode ? '#CBD5E1' : '#475569', fontWeight: 600 }}
+                    stroke={isDarkMode ? '#475569' : '#CBD5E1'}
+                    tickLine={false}
+                    axisLine={{ stroke: isDarkMode ? '#334155' : '#E2E8F0' }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#64748B', fontWeight: 600 }}
+                    stroke={isDarkMode ? '#475569' : '#CBD5E1'}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v) => `₹${Number(v) >= 1000 ? `${(Number(v) / 1000).toFixed(0)}k` : Number(v)}`}
+                  />
                   <Tooltip
-                    formatter={(v, n) => [`₹${Number(v).toLocaleString('en-IN')}`, n]}
+                    formatter={(v, n) => [`₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, n]}
                     contentStyle={{
                       backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
                       borderColor: isDarkMode ? '#334155' : '#E2E8F0',
@@ -493,69 +668,137 @@ const Dashboard = () => {
                       borderRadius: 12,
                       fontSize: 11,
                       fontWeight: 600,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                      boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
                     }}
                   />
-                  <Area type="monotone" dataKey="Sales" stroke="#6366F1" strokeWidth={2.5} fill="url(#gradSales)" dot={false} />
-                  <Area type="monotone" dataKey="Purchases" stroke="#F59E0B" strokeWidth={2.5} fill="url(#gradPurchases)" dot={false} />
-                </AreaChart>
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                  <Line
+                    type="monotone"
+                    dataKey="Sales"
+                    name="Sales"
+                    stroke="#6366F1"
+                    strokeWidth={3}
+                    dot={{ r: 4.5, fill: '#6366F1', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    activeDot={{ r: 6.5, fill: '#6366F1', stroke: '#FFFFFF', strokeWidth: 2.5 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="Purchases"
+                    name="Purchases"
+                    stroke="#F59E0B"
+                    strokeWidth={3}
+                    dot={{ r: 4.5, fill: '#F59E0B', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    activeDot={{ r: 6.5, fill: '#F59E0B', stroke: '#FFFFFF', strokeWidth: 2.5 }}
+                  />
+                </LineChart>
               </ResponsiveContainer>
             )}
           </div>
         </motion.div>
 
-        {/* Category Donut Chart */}
+        {/* Sales, Purchase & Inventory Analysis Donut Chart */}
         <motion.div
           variants={cardVariants}
-          className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"
+          className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between"
         >
-          <div className="mb-4">
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Inventory</p>
-            <h2 className="text-sm font-bold text-slate-900 mt-0.5">Category Breakdown</h2>
+          <div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
+              <div>
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">{analysisData.subtitle}</p>
+                <h2 className="text-sm font-bold text-slate-900 mt-0.5">{analysisData.title}</h2>
+              </div>
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg self-start sm:self-auto">
+                {[
+                  { id: 'overview', label: 'Overview' },
+                  { id: 'sales', label: 'Sales' },
+                  { id: 'purchases', label: 'Purchases' },
+                  { id: 'inventory', label: 'Stock' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setAnalysisMode(tab.id)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                      analysisMode === tab.id
+                        ? 'bg-white text-indigo-700 shadow-sm font-black'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="h-[1px] bg-slate-100 mb-4" />
           </div>
-          <div className="h-[1px] bg-slate-100 mb-4" />
 
-          {categoryBreakdownData.length === 0 ? (
+          {analysisData.items.length === 0 || analysisData.total === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
               <CubeIcon className="w-10 h-10 text-slate-300 mb-2 stroke-1" />
-              <p className="text-sm font-semibold text-slate-600">No Category Data</p>
+              <p className="text-sm font-semibold text-slate-600">No Analysis Data</p>
               <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                Add products with assigned categories to view stock distribution.
+                Record sales bills, purchases or add stock to see business analysis breakdown.
               </p>
             </div>
           ) : (
             <>
-              <div className="h-48 relative flex items-center justify-center">
+              <div className="h-44 relative flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={categoryBreakdownWithPercentages}
+                      data={analysisData.items}
                       cx="50%"
                       cy="50%"
-                      innerRadius={56}
-                      outerRadius={76}
-                      paddingAngle={2}
+                      innerRadius={54}
+                      outerRadius={74}
+                      paddingAngle={analysisData.items.length > 1 ? 3 : 0}
                       dataKey="value"
                     >
-                      {categoryBreakdownWithPercentages.map((entry, i) => (
+                      {analysisData.items.map((entry, i) => (
                         <Cell key={`cell-${i}`} fill={entry.color} stroke="none" />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v, n, p) => [`${v} Products (${p.payload.percentage}%)`, 'Volume']} />
+                    <Tooltip
+                      formatter={(v, n, p) => [
+                        `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${p.payload.percentage})`,
+                        p.payload.name
+                      ]}
+                      contentStyle={{
+                        backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                        borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                        color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                        borderRadius: 12,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="absolute flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Top</span>
-                  <span className="text-2xl font-bold text-slate-900 leading-none mt-0.5">{topCategoryPct}</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{analysisData.centerLabel}</span>
+                  <span className="text-lg font-black text-slate-900 leading-tight mt-0.5">{analysisData.centerValue}</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                {categoryBreakdownWithPercentages.map((item) => (
-                  <div key={item.name} className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-1.5 rounded-xl">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                    <span className="truncate">{item.name}</span>
-                    <span className="ml-auto font-bold text-slate-800 flex-shrink-0">{item.percentage}%</span>
+              <div className="space-y-1.5 mt-2 max-h-36 overflow-y-auto pr-1">
+                {analysisData.items.map((item) => (
+                  <div
+                    key={item.name}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-50/80 border border-slate-100 hover:border-slate-200 transition-all text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-800 text-[11px] truncate">{item.name}</p>
+                        {item.subtitle && <p className="text-[10px] text-slate-400 truncate">{item.subtitle}</p>}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className="font-mono font-bold text-slate-900 text-xs">
+                        ₹{Number(item.value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <span className="inline-block text-[10px] font-semibold text-slate-500">{item.percentage}</span>
+                    </div>
                   </div>
                 ))}
               </div>

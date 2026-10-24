@@ -7,9 +7,13 @@ import { masterPool, getTenantPool } from '../config/tenantDb.js';
 export const cleanExpiredWalkinCustomers = async () => {
   console.log('[Cleanup] Starting expired Walk-in Customers cleanup...');
   try {
+    const [allDbs] = await masterPool.query('SHOW DATABASES');
+    const existingDbs = new Set(allDbs.map(d => Object.values(d)[0]));
+
     const [tenants] = await masterPool.query('SELECT database_name FROM tenants WHERE database_name IS NOT NULL');
+    const validTenants = tenants.filter(t => t.database_name && existingDbs.has(t.database_name));
     
-    for (const tenant of tenants) {
+    for (const tenant of validTenants) {
       const dbName = tenant.database_name;
       console.log(`[Cleanup] Processing database: "${dbName}"`);
       const pool = getTenantPool(dbName);
