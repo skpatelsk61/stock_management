@@ -409,6 +409,7 @@ const CustomerList = () => {
           {/* DASHBOARD STATS METRICS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatsCard 
+              loading={loading}
               title="Total Active Clients" 
               value={kpis.totalCustomers} 
               desc={`${kpis.borrowCustomers} Borrow / ${kpis.walkinCustomers} Walk-in`} 
@@ -416,6 +417,7 @@ const CustomerList = () => {
               color="indigo" 
             />
             <StatsCard 
+              loading={loading}
               title="Outstanding Credit Balance" 
               value={`₹${(kpis.totalOutstandingAmount || 0).toLocaleString('en-IN')}`} 
               desc="Active Udhaar awaiting recovery" 
@@ -423,6 +425,7 @@ const CustomerList = () => {
               color="rose" 
             />
             <StatsCard 
+              loading={loading}
               title="Active Borrowers" 
               value={kpis.activeDebtors ?? kpis.overdueCustomers ?? 0} 
               desc="Accounts with outstanding dues" 
@@ -430,6 +433,7 @@ const CustomerList = () => {
               color="indigo" 
             />
             <StatsCard 
+              loading={loading}
               title="Today's Collections" 
               value={`₹${(kpis.todaysCollections || 0).toLocaleString('en-IN')}`} 
               desc="Payments settled today" 

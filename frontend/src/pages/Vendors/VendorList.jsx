@@ -784,30 +784,35 @@ const VendorList = ({ defaultView = 'list' }) => {
           {/* SUMMARY KPIS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatsCard
+              loading={loading}
               title="Total Active Suppliers"
               value={summaryMetrics.totalVendorsCount}
               icon={BuildingOfficeIcon}
               color="indigo"
             />
             <StatsCard
+              loading={loading}
               title="Net Purchase Volume"
               value={`₹${summaryMetrics.totalNetPurchases.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
               icon={DocumentTextIcon}
               color="blue"
             />
             <StatsCard
+              loading={loading}
               title="Total Amount Paid"
               value={`₹${summaryMetrics.totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
               icon={BanknotesIcon}
               color="emerald"
             />
             <StatsCard
+              loading={loading}
               title="Total Supplier Payables"
               value={`₹${summaryMetrics.totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
               icon={ScaleIcon}
               color="rose"
             />
             <StatsCard
+              loading={loading}
               title="Total Supplier Credit (Adv)"
               value={`₹${summaryMetrics.totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
               icon={CreditCardIcon}

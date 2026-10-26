@@ -557,10 +557,10 @@ const StockDashboard = () => {
           <div className="space-y-5">
             {/* Stats row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatsCard title="Total Stock Units" value={totalQty} icon={CircleStackIcon} subtext="Aggregated Pieces Hand" color="green" />
-              <StatsCard title="Inventory Valuation" value={`₹${totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} icon={CurrencyRupeeIcon} subtext="Purchased Cost Basis" color="purple" />
-              <StatsCard title="Low Stock Warns" value={lowCount} icon={ExclamationTriangleIcon} subtext="Under Buffer Limit" color="orange" />
-              <StatsCard title="Out Of Stock Products" value={outCount} icon={MinusCircleIcon} subtext="Zero Available Lines" color="red" />
+              <StatsCard title="Total Stock Units" value={totalQty} icon={CircleStackIcon} subtext="Aggregated Pieces Hand" color="green" loading={loading} />
+              <StatsCard title="Inventory Valuation" value={`₹${totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} icon={CurrencyRupeeIcon} subtext="Purchased Cost Basis" color="purple" loading={loading} />
+              <StatsCard title="Low Stock Warns" value={lowCount} icon={ExclamationTriangleIcon} subtext="Under Buffer Limit" color="orange" loading={loading} />
+              <StatsCard title="Out Of Stock Products" value={outCount} icon={MinusCircleIcon} subtext="Zero Available Lines" color="red" loading={loading} />
             </div>
 
             {/* Stock Levels Filters & Table */}

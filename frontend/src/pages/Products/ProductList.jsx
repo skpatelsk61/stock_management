@@ -889,11 +889,11 @@ const ProductList = () => {
         animate={{ opacity: 1, y: 0 }}
         className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
       >
-        <StatsCard title="Total Products" value={summaryCounters.total} icon={ShoppingCartIcon} subtext="Catalog Lines" color="blue" />
-        <StatsCard title="Inventory Value" value={`₹${summaryCounters.valuation}`} icon={CurrencyDollarIcon} subtext="Stock Worth" color="green" />
-        <StatsCard title="Low Stock" value={summaryCounters.low} icon={ExclamationTriangleIcon} subtext="Action Required" color="orange" />
-        <StatsCard title="Out Of Stock" value={summaryCounters.out} icon={ExclamationTriangleIcon} subtext="Zero Available" color="red" />
-        <StatsCard title="Near Expiry" value={summaryCounters.nearExpiry} icon={ArrowPathIcon} subtext="Perishables" color="purple" />
+        <StatsCard title="Total Products" value={summaryCounters.total} icon={ShoppingCartIcon} subtext="Catalog Lines" color="blue" loading={loading} />
+        <StatsCard title="Inventory Value" value={`₹${summaryCounters.valuation}`} icon={CurrencyDollarIcon} subtext="Stock Worth" color="green" loading={loading} />
+        <StatsCard title="Low Stock" value={summaryCounters.low} icon={ExclamationTriangleIcon} subtext="Action Required" color="orange" loading={loading} />
+        <StatsCard title="Out Of Stock" value={summaryCounters.out} icon={ExclamationTriangleIcon} subtext="Zero Available" color="red" loading={loading} />
+        <StatsCard title="Near Expiry" value={summaryCounters.nearExpiry} icon={ArrowPathIcon} subtext="Perishables" color="purple" loading={loading} />
       </motion.div>
 
       {/* STICKY BULK ACTIONS BANNER */}

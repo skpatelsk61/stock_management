@@ -635,6 +635,7 @@ const SalesList = () => {
       {/* STATS OVERVIEW CARDS (Real-Time Live Numbers) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
+          loading={loading}
           title="Today's Sales"
           value={`₹${statsSummary.todayVolume}`}
           icon={BanknotesIcon}
@@ -642,6 +643,7 @@ const SalesList = () => {
           color="green"
         />
         <StatsCard
+          loading={loading}
           title="Total Volume"
           value={`₹${statsSummary.volume}`}
           icon={ArrowTrendingUpIcon}
@@ -649,6 +651,7 @@ const SalesList = () => {
           color="blue"
         />
         <StatsCard
+          loading={loading}
           title="Unpaid / Udhaar"
           value={`₹${statsSummary.unpaidAmount}`}
           icon={ClockIcon}
@@ -656,6 +659,7 @@ const SalesList = () => {
           color="orange"
         />
         <StatsCard
+          loading={loading}
           title="Average Ticket"
           value={`₹${statsSummary.avgInvoice}`}
           icon={ReceiptPercentIcon}
