@@ -14,6 +14,7 @@ import {
 import StatusBadge from '../../components/common/StatusBadge';
 import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
+import { invalidateProductMastersCache } from '../../components/forms/ProductForm';
 
 const CategoryList = () => {
   const { isDarkMode } = useAppSelector((state) => state.theme);
@@ -123,10 +124,17 @@ const CategoryList = () => {
     setModalMode('add');
     setEditId(null);
     const initialCatId = categories.length > 0 ? categories[0].id : '';
+    let initialSubId = '';
+    if (activeTab === 'brand' && initialCatId) {
+      const activeSubs = subCategories.filter(s => String(s.category_id) === String(initialCatId) && s.status === 'Active');
+      if (activeSubs.length > 0) {
+        initialSubId = activeSubs[0].id;
+      }
+    }
     setFormData({
       name: '',
       category_id: activeTab === 'main' ? '' : initialCatId,
-      sub_category_id: '',
+      sub_category_id: initialSubId,
       description: '',
       status: 'Active'
     });
@@ -138,9 +146,16 @@ const CategoryList = () => {
   const handleOpenEditModal = (item) => {
     setModalMode('edit');
     setEditId(item.id);
+    let resolvedCatId = item.category_id || (categories.length > 0 ? categories[0].id : '');
+    if (activeTab === 'brand' && item.sub_category_id) {
+      const parentSub = subCategories.find(s => String(s.id) === String(item.sub_category_id));
+      if (parentSub && parentSub.category_id) {
+        resolvedCatId = parentSub.category_id;
+      }
+    }
     setFormData({
       name: item.name || '',
-      category_id: item.category_id || (categories.length > 0 ? categories[0].id : ''),
+      category_id: resolvedCatId,
       sub_category_id: item.sub_category_id || '',
       description: item.description || '',
       status: item.status || 'Active'
@@ -222,10 +237,12 @@ const CategoryList = () => {
           if (res.success) showSuccess('Sub Category updated successfully!');
         }
       } else if (activeTab === 'brand') {
+        const parentSub = subCategories.find(s => String(s.id) === String(formData.sub_category_id));
+        const finalCatId = parentSub?.category_id || formData.category_id;
         if (modalMode === 'add') {
           const res = await brandsAPI.create({
             name: formData.name.trim(),
-            category_id: formData.category_id,
+            category_id: finalCatId,
             sub_category_id: formData.sub_category_id,
             description: formData.description,
             status: formData.status
@@ -234,7 +251,7 @@ const CategoryList = () => {
         } else {
           const res = await brandsAPI.update(editId, {
             name: formData.name.trim(),
-            category_id: formData.category_id,
+            category_id: finalCatId,
             sub_category_id: formData.sub_category_id,
             description: formData.description,
             status: formData.status
@@ -245,6 +262,10 @@ const CategoryList = () => {
 
       handleCloseModal();
       loadData();
+      invalidateProductMastersCache();
+      window.dispatchEvent(new CustomEvent('category-updated'));
+      window.dispatchEvent(new CustomEvent('brand-updated'));
+      window.dispatchEvent(new CustomEvent('inventory-updated'));
     } catch (err) {
       console.error('Submit Master Error:', err);
       setError(err.response?.data?.message || 'Operation failed. Please check form values.');
@@ -268,6 +289,10 @@ const CategoryList = () => {
         if (res.success) showSuccess(`Brand "${name}" status changed to ${targetStatus}`);
       }
       loadData();
+      invalidateProductMastersCache();
+      window.dispatchEvent(new CustomEvent('category-updated'));
+      window.dispatchEvent(new CustomEvent('brand-updated'));
+      window.dispatchEvent(new CustomEvent('inventory-updated'));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to toggle status');
     }
@@ -566,7 +591,22 @@ const CategoryList = () => {
                     <select
                       required
                       value={formData.category_id}
-                      onChange={(e) => setFormData({ ...formData, category_id: e.target.value, sub_category_id: '' })}
+                      onChange={(e) => {
+                        const newCatId = e.target.value;
+                        const matchingSubs = subCategories.filter(s => 
+                          String(s.category_id) === String(newCatId) && 
+                          (s.status === 'Active' || String(s.id) === String(formData.sub_category_id))
+                        );
+                        // Auto-select first matching subcategory if current subcategory does not belong to new category
+                        const isCurrentValid = matchingSubs.some(s => String(s.id) === String(formData.sub_category_id));
+                        const nextSubId = isCurrentValid ? formData.sub_category_id : (matchingSubs.length > 0 ? matchingSubs[0].id : '');
+
+                        setFormData({
+                          ...formData,
+                          category_id: newCatId,
+                          sub_category_id: nextSubId
+                        });
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                     >
                       <option value="">Select Main Category</option>
@@ -584,13 +624,21 @@ const CategoryList = () => {
                       required
                       disabled={!formData.category_id}
                       value={formData.sub_category_id}
-                      onChange={(e) => setFormData({ ...formData, sub_category_id: e.target.value })}
+                      onChange={(e) => {
+                        const chosenSubId = e.target.value;
+                        const parentSub = subCategories.find(s => String(s.id) === String(chosenSubId));
+                        setFormData({
+                          ...formData,
+                          sub_category_id: chosenSubId,
+                          category_id: parentSub?.category_id || formData.category_id
+                        });
+                      }}
                       className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
                     >
                       {!formData.category_id ? (
                         <option value="">Select Main Category First</option>
                       ) : subCategories.filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id))).length === 0 ? (
-                        <option value="" disabled>No Sub Categories Available</option>
+                        <option value="" disabled>No Sub Categories Available for this Category</option>
                       ) : (
                         <option value="">Select Sub Category</option>
                       )}

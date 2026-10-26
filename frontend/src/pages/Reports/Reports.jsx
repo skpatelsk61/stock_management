@@ -36,6 +36,17 @@ const Reports = () => {
   const [loading, setLoading] = useState(true);
   const [dataList, setDataList] = useState([]);
   const [dbOffline, setDbOffline] = useState(false);
+  const [purchaseSummary, setPurchaseSummary] = useState({
+    totalPurchases: 0,
+    grossSubtotal: 0,
+    totalGst: 0,
+    totalDiscount: 0,
+    vendorReturns: 0,
+    totalExpenses: 0,
+    supplierOutstanding: 0,
+    totalInvoices: 0,
+    totalProducts: 0
+  });
 
   // --- Graphical Analytics States ---
   const [analyticsScope, setAnalyticsScope] = useState('overall'); // 'overall', 'product'
@@ -218,7 +229,10 @@ const Reports = () => {
         if (res.success) setDataList(res.report);
       } else if (activeTab === 'purchase') {
         const res = await reportsAPI.getPurchaseReport(params);
-        if (res.success) setDataList(res.report);
+        if (res.success) {
+          setDataList(res.report || []);
+          if (res.summary) setPurchaseSummary(res.summary);
+        }
       } else if (activeTab === 'adjustments') {
         const res = await stockAPI.getAdjustments(params);
         if (res.success && Array.isArray(res.adjustments)) {
@@ -325,6 +339,37 @@ const Reports = () => {
       return;
     }
 
+    if (activeTab === 'purchase') {
+      let csvContent = 'data:text/csv;charset=utf-8,';
+      csvContent += 'Invoice No,Purchase Date,Supplier Name,Product Name,Quantity,Unit,Purchase Price (INR),Discount (INR),Tax Amount (INR),Tax %,Line Amount (INR),Payment Status,Invoice Subtotal (INR),Invoice Tax (INR),Invoice Total (INR)\n';
+      dataList.forEach(row => {
+        const invNo = (row.purchase_no || '').replace(/"/g, '""');
+        const dt = (row.date ? row.date.slice(0, 10) : '').replace(/"/g, '""');
+        const vend = (row.vendor || '').replace(/"/g, '""');
+        const prod = (row.product_name || '').replace(/"/g, '""');
+        const qty = Number(row.quantity || 0);
+        const unit = (row.unit || 'Pcs').replace(/"/g, '""');
+        const pPrice = Number(row.purchase_price || 0).toFixed(2);
+        const disc = Number(row.discount || 0).toFixed(2);
+        const tax = Number(row.tax || 0).toFixed(2);
+        const taxPct = Number(row.tax_percent || 0);
+        const lAmt = Number(row.line_amount || 0).toFixed(2);
+        const status = (row.payment_status || '').replace(/"/g, '""');
+        const invSub = Number(row.invoice_subtotal || 0).toFixed(2);
+        const invTax = Number(row.invoice_gst || 0).toFixed(2);
+        const invTot = Number(row.invoice_total || 0).toFixed(2);
+        csvContent += `"${invNo}","${dt}","${vend}","${prod}",${qty},"${unit}",${pPrice},${disc},${tax},${taxPct}%,${lAmt},"${status}",${invSub},${invTax},${invTot}\n`;
+      });
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', `Kirana_ERP_Purchases_LineItems_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     if (!dataList || dataList.length === 0) return;
     const headers = Object.keys(dataList[0]);
     const csvRows = [];
@@ -371,12 +416,14 @@ const Reports = () => {
   };
 
   const handleVoidPurchaseEntry = async (row) => {
-    if (!window.confirm(`Are you sure you want to VOID Purchase Invoice "${row.purchase_no}"?\nThis action will reverse the purchase and deduct stock/balances.`)) return;
+    const purchaseId = row.purchase_id || row.id;
+    const purchaseNo = row.purchase_no || 'selected';
+    if (!window.confirm(`Are you sure you want to VOID Purchase Invoice "${purchaseNo}"?\nThis action will reverse the purchase and deduct stock/balances.`)) return;
     try {
       setLoading(true);
-      const res = await purchasesAPI.delete(row.id);
+      const res = await purchasesAPI.delete(purchaseId);
       if (res.success) {
-        toast.success(`Purchase invoice "${row.purchase_no}" voided successfully.`);
+        toast.success(`Purchase invoice "${purchaseNo}" voided successfully.`);
         fetchReportData();
       } else {
         toast.error(res.message || 'Failed to void purchase invoice.');
@@ -416,20 +463,20 @@ const Reports = () => {
   const getColumns = () => {
     if (activeTab === 'inventory') {
       return [
-        { key: 'barcode', label: 'Barcode' },
-        { key: 'name', label: 'Product Description' },
-        { key: 'category', label: 'Category' },
-        { key: 'purchase_price', label: 'Purchase Cost', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'selling_price', label: 'Selling Price', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'stock_level', label: 'Stock Count' },
-        { key: 'valuation', label: 'Total Valuation', render: (val) => `₹${Number(val).toFixed(2)}` },
+        { key: 'barcode', label: 'Barcode', render: (val) => <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{val || 'N/A'}</span> },
+        { key: 'name', label: 'Product Description', render: (val) => <span className="font-semibold text-slate-900 dark:text-white whitespace-nowrap">{val}</span> },
+        { key: 'category', label: 'Category', render: (val) => <span className="whitespace-nowrap">{val || '—'}</span> },
+        { key: 'purchase_price', label: 'Purchase Cost', render: (val) => <span className="font-mono whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'selling_price', label: 'Selling Price', render: (val) => <span className="font-mono whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'stock_level', label: 'Stock Count', render: (val) => <span className="font-mono font-bold whitespace-nowrap">{val}</span> },
+        { key: 'valuation', label: 'Total Valuation', render: (val) => <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
         {
           key: 'action',
           label: 'Action',
           render: (_, row) => (
             <button
               onClick={() => handleVoidInventoryEntry(row)}
-              className="px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors flex items-center gap-1 shadow-xs"
+              className="px-2.5 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-lg transition-colors flex items-center gap-1 shadow-xs cursor-pointer whitespace-nowrap"
             >
               🚫 Void Entry
             </button>
@@ -439,21 +486,21 @@ const Reports = () => {
     }
     if (activeTab === 'sales') {
       return [
-        { key: 'invoice_no', label: 'Invoice No.' },
-        { key: 'date', label: 'Date', render: (val) => val ? val.slice(0, 10) : '' },
-        { key: 'customer', label: 'Customer' },
-        { key: 'subtotal', label: 'Subtotal', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'gst_amount', label: 'GST Tax', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'discount', label: 'Discount', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'total', label: 'Final Total', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'payment_method', label: 'Method' },
+        { key: 'invoice_no', label: 'Invoice No.', render: (val) => <span className="font-bold font-mono text-slate-800 dark:text-slate-100 whitespace-nowrap">{val}</span> },
+        { key: 'date', label: 'Date', render: (val) => <span className="font-medium whitespace-nowrap">{val ? val.slice(0, 10) : ''}</span> },
+        { key: 'customer', label: 'Customer', render: (val) => <span className="font-semibold whitespace-nowrap">{val || 'Walk-in Customer'}</span> },
+        { key: 'subtotal', label: 'Subtotal', render: (val) => <span className="font-mono whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'gst_amount', label: 'GST Tax', render: (val) => <span className="font-mono text-amber-600 dark:text-amber-400 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'discount', label: 'Discount', render: (val) => <span className="font-mono whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'total', label: 'Final Total', render: (val) => <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'payment_method', label: 'Method', render: (val) => <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 whitespace-nowrap">{val || 'Cash'}</span> },
         {
           key: 'action',
           label: 'Action',
           render: (_, row) => (
             <button
               onClick={() => handleVoidSalesEntry(row)}
-              className="px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors flex items-center gap-1 shadow-xs"
+              className="px-2.5 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-lg transition-colors flex items-center gap-1 shadow-xs cursor-pointer whitespace-nowrap"
             >
               🚫 Void Entry
             </button>
@@ -463,21 +510,54 @@ const Reports = () => {
     }
     if (activeTab === 'purchase') {
       return [
-        { key: 'purchase_no', label: 'Purchase No.' },
-        { key: 'date', label: 'Date', render: (val) => val ? val.slice(0, 10) : '' },
-        { key: 'vendor', label: 'Supplier Vendor' },
-        { key: 'subtotal', label: 'Subtotal', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'gst_amount', label: 'GST Tax', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'discount', label: 'Discount', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'total', label: 'Total Paid', render: (val) => `₹${Number(val).toFixed(2)}` },
-        { key: 'payment_status', label: 'Payment status', render: (val) => <StatusBadge status={val} /> },
+        { 
+          key: 'purchase_no', 
+          label: 'Invoice No.', 
+          render: (val, row) => (
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="font-bold font-mono text-slate-900 dark:text-slate-100">{val || 'N/A'}</span>
+              {row.supplier_invoice_no && (
+                <span className="text-[10px] text-slate-400 font-mono">(Ref: {row.supplier_invoice_no})</span>
+              )}
+            </div>
+          )
+        },
+        { key: 'date', label: 'Purchase Date', render: (val) => <span className="whitespace-nowrap font-medium text-slate-700 dark:text-slate-300">{val ? val.slice(0, 10) : ''}</span> },
+        { key: 'vendor', label: 'Supplier Name', render: (val) => <span className="font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">{val || 'N/A'}</span> },
+        { key: 'product_name', label: 'Product Name', render: (val) => <span className="font-bold text-slate-900 dark:text-white whitespace-nowrap">{val || 'N/A'}</span> },
+        { 
+          key: 'quantity', 
+          label: 'Quantity', 
+          render: (val, row) => (
+            <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+              {Number(val || 0)} {row.unit || 'Pcs'}
+            </span>
+          )
+        },
+        { key: 'unit', label: 'Unit', render: (val) => <span className="text-slate-500 dark:text-slate-400 text-xs whitespace-nowrap">{val || 'Pcs'}</span> },
+        { key: 'purchase_price', label: 'Purchase Price', render: (val) => <span className="font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'discount', label: 'Discount', render: (val) => <span className="font-mono text-slate-600 dark:text-slate-300 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { 
+          key: 'tax', 
+          label: 'Tax (GST)', 
+          render: (val, row) => (
+            <div className="flex items-center gap-1 whitespace-nowrap">
+              <span className="font-mono font-bold text-slate-800 dark:text-slate-200">₹{Number(val || 0).toFixed(2)}</span>
+              {Number(row.tax_percent || 0) > 0 && (
+                <span className="text-[10px] text-slate-400 font-mono">({row.tax_percent}%)</span>
+              )}
+            </div>
+          )
+        },
+        { key: 'line_amount', label: 'Product Line Amount', render: (val) => <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
+        { key: 'payment_status', label: 'Payment Status', render: (val) => <StatusBadge status={val} /> },
         {
           key: 'action',
           label: 'Action',
           render: (_, row) => (
             <button
               onClick={() => handleVoidPurchaseEntry(row)}
-              className="px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors flex items-center gap-1 shadow-xs"
+              className="px-2.5 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-lg transition-colors flex items-center gap-1 shadow-xs cursor-pointer whitespace-nowrap"
             >
               🚫 Void Entry
             </button>
@@ -487,39 +567,39 @@ const Reports = () => {
     }
     if (activeTab === 'adjustments') {
       return [
-        { key: 'adjustment_no', label: 'Adjustment No.' },
-        { key: 'created_at', label: 'Date & Time', render: (val) => val ? new Date(val).toLocaleString() : 'N/A' },
-        { key: 'product_name', label: 'Product Description', render: (val, row) => val || row.name || 'N/A' },
+        { key: 'adjustment_no', label: 'Adjustment No.', render: (val) => <span className="font-bold font-mono whitespace-nowrap">{val}</span> },
+        { key: 'created_at', label: 'Date & Time', render: (val) => <span className="whitespace-nowrap">{val ? new Date(val).toLocaleString() : 'N/A'}</span> },
+        { key: 'product_name', label: 'Product Description', render: (val, row) => <span className="font-bold whitespace-nowrap">{val || row.name || 'N/A'}</span> },
         { key: 'adjustment_type', label: 'Adjustment Type', render: (val) => (
-          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${val === 'Increase' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider whitespace-nowrap ${val === 'Increase' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
             {val === 'Increase' ? '▲ Increase (+)' : '▼ Decrease (-)'}
           </span>
         )},
         { key: 'quantity', label: 'Quantity', render: (val, row) => (
-          <span className={`font-mono font-bold ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+          <span className={`font-mono font-bold whitespace-nowrap ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
             {row.adjustment_type === 'Increase' ? '+' : '-'}{Math.abs(Number(val))}
           </span>
         )},
-        { key: 'unit_cost', label: 'Unit Cost', render: (val) => `₹${Number(val || 0).toFixed(2)}` },
+        { key: 'unit_cost', label: 'Unit Cost', render: (val) => <span className="font-mono whitespace-nowrap">₹{Number(val || 0).toFixed(2)}</span> },
         { key: 'adjustment_value', label: 'Valuation Impact', render: (val, row) => (
-          <span className={`font-mono font-black ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+          <span className={`font-mono font-black whitespace-nowrap ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
             {row.adjustment_type === 'Increase' ? '+' : '-'}₹{Number(val || 0).toFixed(2)}
           </span>
         )},
-        { key: 'reason', label: 'Reason' },
-        { key: 'remarks', label: 'Remarks / Notes' },
-        { key: 'user_name', label: 'Adjusted By', render: (val, row) => val || row.user_id || 'System' },
+        { key: 'reason', label: 'Reason', render: (val) => <span className="whitespace-nowrap">{val || 'N/A'}</span> },
+        { key: 'remarks', label: 'Remarks / Notes', render: (val) => <span className="whitespace-nowrap">{val || '—'}</span> },
+        { key: 'user_name', label: 'Adjusted By', render: (val, row) => <span className="whitespace-nowrap">{val || row.user_id || 'System'}</span> },
         { key: 'status', label: 'Status', render: (val) => <StatusBadge status={val || 'Completed'} /> }
       ];
     }
     if (activeTab === 'lowstock') {
       return [
-        { key: 'barcode', label: 'Barcode' },
-        { key: 'name', label: 'Product Description' },
-        { key: 'min_stock', label: 'Min. Buffer' },
-        { key: 'current_stock', label: 'Current Level' },
+        { key: 'barcode', label: 'Barcode', render: (val) => <span className="font-mono text-xs whitespace-nowrap">{val || 'N/A'}</span> },
+        { key: 'name', label: 'Product Description', render: (val) => <span className="font-semibold whitespace-nowrap">{val}</span> },
+        { key: 'min_stock', label: 'Min. Buffer', render: (val) => <span className="font-mono whitespace-nowrap">{val}</span> },
+        { key: 'current_stock', label: 'Current Level', render: (val) => <span className="font-mono font-bold whitespace-nowrap">{val}</span> },
         { key: 'reorder_status', label: 'Replenish Status', render: (val) => (
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
             val === 'Critical' ? 'bg-red-50 text-red-700 border border-red-100 animate-pulse' : 'bg-amber-50 text-amber-700 border border-amber-100'
           }`}>
             {val}
@@ -1387,33 +1467,33 @@ const Reports = () => {
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
                 <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4">Stock Movement & Audit Logs</h3>
                 <div className="overflow-x-auto max-h-[300px] overflow-y-auto scrollbar-thin">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full min-w-[800px] text-left border-collapse text-xs">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-950/50">
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Timestamp</th>
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Action Type</th>
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Quantity</th>
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Product</th>
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Warehouse</th>
-                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300">Reference / Invoice</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Timestamp</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Action Type</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Quantity</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Product</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Warehouse</th>
+                        <th className="py-2.5 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">Reference / Invoice</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-medium text-slate-650 dark:text-slate-300">
                       {analyticsData.charts?.movementLogs && analyticsData.charts.movementLogs.length > 0 ? (
                         analyticsData.charts.movementLogs.map((log, index) => (
-                          <tr key={index} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors">
-                            <td className="py-2.5 px-3 text-slate-400 dark:text-slate-500">{new Date(log.created_at).toLocaleString()}</td>
-                            <td className="py-2.5 px-3 font-bold">
+                          <tr key={index} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors whitespace-nowrap">
+                            <td className="py-2.5 px-3 text-slate-400 dark:text-slate-500 whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</td>
+                            <td className="py-2.5 px-3 font-bold whitespace-nowrap">
                               <span className={`px-2 py-0.5 rounded text-[10px] ${
                                 log.type === 'Stock In' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : log.type === 'Stock Out' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                               }`}>
                                 {log.type}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">{log.quantity} Units</td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-800 dark:text-slate-200">{log.product_name || 'N/A'}</td>
-                            <td className="py-2.5 px-3 text-slate-550 dark:text-slate-400">{log.warehouse_name || 'General Warehouse'}</td>
-                            <td className="py-2.5 px-3 font-semibold text-indigo-600 dark:text-indigo-400">{log.reference_no}</td>
+                            <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">{log.quantity} Units</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">{log.product_name || 'N/A'}</td>
+                            <td className="py-2.5 px-3 text-slate-550 dark:text-slate-400 whitespace-nowrap">{log.warehouse_name || 'General Warehouse'}</td>
+                            <td className="py-2.5 px-3 font-semibold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">{log.reference_no}</td>
                           </tr>
                         ))
                       ) : (
@@ -1430,7 +1510,122 @@ const Reports = () => {
         </div>
       ) : (
         /* TABLE REPORT VIEW */
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft space-y-6">
+          {activeTab === 'purchase' && (
+            <div className="space-y-4 mb-6">
+              {/* Executive Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Net Purchases Total</span>
+                  <span className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">After returns</span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Subtotal (Excl. Tax)</span>
+                  <span className="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.grossSubtotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Taxable value</span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Total Tax (GST)</span>
+                  <span className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.totalGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Input tax credit</span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Total Discounts</span>
+                  <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.totalDiscount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Supplier discounts</span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Supplier Outstanding</span>
+                  <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.supplierOutstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Unpaid supplier due</span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Purchase Expenses</span>
+                  <span className="text-base sm:text-lg font-black text-blue-600 dark:text-blue-400 font-mono mt-1 block">
+                    ₹{Number(purchaseSummary.totalExpenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Net expenditure</span>
+                </div>
+              </div>
+
+              {/* Purchase Filter & Stats Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Filters:</span>
+                  <select
+                    value={datePreset}
+                    onChange={(e) => setDatePreset(e.target.value)}
+                    className="px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="today">Today</option>
+                    <option value="7days">Last 7 Days</option>
+                    <option value="30days">Last 30 Days</option>
+                    <option value="year">This Year</option>
+                    <option value="all">All Time</option>
+                    <option value="custom">Custom Date Range</option>
+                  </select>
+
+                  {datePreset === 'custom' && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                      />
+                      <span className="text-slate-400">to</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                      />
+                    </div>
+                  )}
+
+                  <select
+                    value={selectedVendor}
+                    onChange={(e) => setSelectedVendor(e.target.value)}
+                    className="px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg font-medium bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">All Suppliers</option>
+                    {vendorsList.map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                  <span>📄 {purchaseSummary.totalInvoices || 0} Invoices</span>
+                  <span>•</span>
+                  <span>📦 {purchaseSummary.totalProducts || 0} Line Items</span>
+                  {Number(purchaseSummary.vendorReturns || 0) > 0 && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-600 dark:text-amber-400">↩ ₹{Number(purchaseSummary.vendorReturns).toFixed(2)} Returns</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="py-12 flex justify-center">
               <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 animate-pulse">Generating report dataset...</span>
@@ -1441,6 +1636,15 @@ const Reports = () => {
               data={dataList}
               itemsPerPage={10}
               striped={true}
+              tableClassName={
+                activeTab === 'purchase'
+                  ? 'min-w-[1360px]'
+                  : activeTab === 'adjustments'
+                  ? 'min-w-[1240px]'
+                  : activeTab === 'sales'
+                  ? 'min-w-[1080px]'
+                  : 'min-w-[960px]'
+              }
             />
           )}
         </div>

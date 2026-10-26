@@ -85,18 +85,49 @@ import {
 //   }
 // };
 
+// High-performance in-memory cache for dashboard KPIs and charts (30 seconds TTL)
+const dashboardKpiCache = new Map();
+const dashboardChartCache = new Map();
+const DASHBOARD_CACHE_TTL_MS = 30 * 1000;
+
+export const clearDashboardCache = (tenantDbName = null) => {
+  if (tenantDbName) {
+    for (const key of dashboardKpiCache.keys()) {
+      if (key.startsWith(tenantDbName)) dashboardKpiCache.delete(key);
+    }
+    for (const key of dashboardChartCache.keys()) {
+      if (key.startsWith(tenantDbName)) dashboardChartCache.delete(key);
+    }
+  } else {
+    dashboardKpiCache.clear();
+    dashboardChartCache.clear();
+  }
+};
+
+// @desc    Get dashboard metrics / KPIs for tenant
+// @route   GET /api/reports/dashboard-kpis
+// @access  Private
 export const getDashboardKPIs = async (req, res, next) => {
   try {
-    // --- YAHAN PAR YE 2 NAYI LINES ADD KARNI HAIN ---
     if (req.query.startDate === '') req.query.startDate = null;
     if (req.query.endDate === '') req.query.endDate = null;
-    // ------------------------------------------------
 
-    const kpis = await getExecutiveDashboardKPIs(req.db, req.query);
+    const isRefresh = req.query.refresh === 'true' || req.query.refresh === true;
+    const dbName = req.tenantDbName || req.db?.config?.database || 'default';
+    const cacheKey = `${dbName}_kpi_${req.query.startDate || ''}_${req.query.endDate || ''}_${req.query.categoryId || ''}_${req.query.brandId || ''}`;
 
-    // Near Expiry products (active FIFO batch within 30 days)
-    const [nearExpiry] = await req.db.query(`
-      SELECT COUNT(*) as count FROM (
+    if (!isRefresh && dashboardKpiCache.has(cacheKey)) {
+      const cached = dashboardKpiCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.status(200).json(cached.data);
+      }
+    }
+
+    const expiryQuery = `
+      SELECT 
+        COUNT(CASE WHEN t.active_expiry > CURRENT_DATE() AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY) THEN 1 END) as nearExpiry,
+        COUNT(CASE WHEN t.active_expiry <= CURRENT_DATE() THEN 1 END) as expired
+      FROM (
         SELECT p.id, 
                COALESCE(
                  (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
@@ -106,28 +137,10 @@ export const getDashboardKPIs = async (req, res, next) => {
       ) t
       WHERE t.active_expiry IS NOT NULL 
         AND CAST(t.active_expiry AS CHAR) NOT IN ('', 'N/A', '0000-00-00')
-        AND t.active_expiry > CURRENT_DATE() 
-        AND t.active_expiry <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
-    `);
+    `;
 
-    // Expired products (active FIFO batch expired)
-    const [expired] = await req.db.query(`
-      SELECT COUNT(*) as count FROM (
-        SELECT p.id, 
-               COALESCE(
-                 (SELECT pb.expiry_date FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0 AND pb.expiry_date IS NOT NULL AND CAST(pb.expiry_date AS CHAR) NOT IN ('', 'N/A', '0000-00-00') ORDER BY pb.purchase_date ASC, pb.id ASC LIMIT 1),
-                 p.expiry_date
-               ) as active_expiry
-        FROM products p
-      ) t
-      WHERE t.active_expiry IS NOT NULL 
-        AND CAST(t.active_expiry AS CHAR) NOT IN ('', 'N/A', '0000-00-00')
-        AND t.active_expiry <= CURRENT_DATE()
-    `);
-
-    // Category Distribution (Valuation, products count, sales & purchases per category)
-    const [categoryDist] = await req.db.query(`
-      SELECT c.name as name, COUNT(p.id) as value,
+    const categoryDistQuery = `
+      SELECT c.name as name, COUNT(DISTINCT p.id) as value,
              COALESCE(
                (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
                 FROM purchase_batches pb 
@@ -141,17 +154,76 @@ export const getDashboardKPIs = async (req, res, next) => {
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
       GROUP BY c.id, c.name
-    `);
+    `;
 
-    return res.status(200).json({
+    const todaySalesQuery = `
+      SELECT 
+        GREATEST(0, COALESCE(SUM(s.total), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE(s2.date) = CURRENT_DATE()), 0)) as totalSales,
+        COUNT(s.id) as totalOrders
+      FROM sales s
+      WHERE DATE(s.date) = CURRENT_DATE()
+    `;
+
+    const todayCogsQuery = `
+      SELECT COALESCE(SUM(
+        (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+        COALESCE(
+          NULLIF(si.purchase_cost, 0),
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+          NULLIF(pr.purchase_price, 0),
+          0
+        )
+      ), 0) as todayCogs
+      FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      JOIN products pr ON si.product_id = pr.id
+      WHERE DATE(s.date) = CURRENT_DATE()
+    `;
+
+    const [
+      kpis,
+      [expiryRows],
+      [categoryDist],
+      [todaySalesRows],
+      [todayCogsRows]
+    ] = await Promise.all([
+      getExecutiveDashboardKPIs(req.db, req.query),
+      req.db.query(expiryQuery),
+      req.db.query(categoryDistQuery),
+      req.db.query(todaySalesQuery),
+      req.db.query(todayCogsQuery)
+    ]);
+
+    const todaySales = Number(todaySalesRows[0]?.totalSales || 0);
+    const todayOrders = Number(todaySalesRows[0]?.totalOrders || 0);
+    const todayCogs = Number(todayCogsRows[0]?.todayCogs || 0);
+    const todayProfit = Math.max(0, Number((todaySales - todayCogs).toFixed(2)));
+
+    const today = {
+      totalSales: todaySales,
+      totalOrders: todayOrders,
+      grossProfit: todayProfit,
+      profit: todayProfit
+    };
+
+    const responseData = {
       success: true,
       kpis: {
         ...kpis,
-        nearExpiry: nearExpiry[0].count,
-        expired: expired[0].count
+        nearExpiry: Number(expiryRows[0]?.nearExpiry || 0),
+        expired: Number(expiryRows[0]?.expired || 0)
       },
-      categoryDist
+      categoryDist,
+      today
+    };
+
+    // Store in cache
+    dashboardKpiCache.set(cacheKey, {
+      data: responseData,
+      expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS
     });
+
+    return res.status(200).json(responseData);
   } catch (error) {
     next(error);
   }
@@ -162,54 +234,109 @@ export const getDashboardKPIs = async (req, res, next) => {
 // @access  Private
 export const getDashboardCharts = async (req, res, next) => {
   try {
-    // 1. Sales vs Purchases Trends (Monthly breakdown of last 6 months after sales and purchase returns)
-    const [salesTrend] = await req.db.query(`
-      SELECT DATE_FORMAT(s.date, '%b %Y') as month, 
-             GREATEST(0, COALESCE(SUM(s.total), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE_FORMAT(s2.date, '%Y-%m') = DATE_FORMAT(MIN(s.date), '%Y-%m')), 0)) as sales,
-             COALESCE(SUM(CASE WHEN s.payment_method LIKE '%Credit%' OR s.payment_method LIKE '%Udhar%' OR s.payment_method LIKE '%Borrow%' OR s.due_amount > 0 THEN IF(s.due_amount > 0, s.due_amount, s.total) ELSE 0 END), 0) as udhar
-      FROM sales s
-      WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
-      ORDER BY MIN(s.date) ASC
-    `);
+    const isRefresh = req.query.refresh === 'true' || req.query.refresh === true;
+    const dbName = req.tenantDbName || req.db?.config?.database || 'default';
+    const cacheKey = `${dbName}_charts`;
 
-    const [purchaseTrend] = await req.db.query(`
-      SELECT DATE_FORMAT(p.date, '%b %Y') as month, 
-             GREATEST(0, COALESCE(SUM(p.total), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN purchases p2 ON pr.purchase_id = p2.id WHERE DATE_FORMAT(p2.date, '%Y-%m') = DATE_FORMAT(MIN(p.date), '%Y-%m') AND pr.status != 'Cancelled'), 0)) as purchases
-      FROM purchases p
-      WHERE p.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(p.date, '%Y-%m'), DATE_FORMAT(p.date, '%b %Y')
-      ORDER BY MIN(p.date) ASC
-    `);
+    if (!isRefresh && dashboardChartCache.has(cacheKey)) {
+      const cached = dashboardChartCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.status(200).json(cached.data);
+      }
+    }
 
-    // Dynamic Goods Received Note (GRN) warehouse inward logs per month
-    const [grnTrend] = await req.db.query(`
-      SELECT DATE_FORMAT(created_at, '%b %Y') as month,
-             COALESCE(SUM(CASE WHEN type = 'Stock In' THEN quantity ELSE 0 END), 0) as grnQty,
-             COUNT(CASE WHEN type = 'Stock In' THEN 1 END) as grnCount
-      FROM stock_logs
-      WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m'), DATE_FORMAT(created_at, '%b %Y')
-    `);
-
-    // Calculate monthly COGS for real profit computation
-    const [monthlyCogs] = await req.db.query(`
-      SELECT DATE_FORMAT(s.date, '%b %Y') as month,
-             COALESCE(SUM(
-               (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+    const [
+      [salesTrend],
+      [purchaseTrend],
+      [grnTrend],
+      [monthlyCogs],
+      [categoryDist],
+      [warehouseDist],
+      [dailySales],
+      [stockMovement]
+    ] = await Promise.all([
+      req.db.query(`
+        SELECT DATE_FORMAT(s.date, '%b %Y') as month, 
+               GREATEST(0, COALESCE(SUM(s.total), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE_FORMAT(s2.date, '%Y-%m') = DATE_FORMAT(MIN(s.date), '%Y-%m')), 0)) as sales,
+               COALESCE(SUM(CASE WHEN s.payment_method LIKE '%Credit%' OR s.payment_method LIKE '%Udhar%' OR s.payment_method LIKE '%Borrow%' OR s.due_amount > 0 THEN IF(s.due_amount > 0, s.due_amount, s.total) ELSE 0 END), 0) as udhar
+        FROM sales s
+        WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+        GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
+        ORDER BY MIN(s.date) ASC
+      `),
+      req.db.query(`
+        SELECT DATE_FORMAT(p.date, '%b %Y') as month, 
+               GREATEST(0, COALESCE(SUM(p.total), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN purchases p2 ON pr.purchase_id = p2.id WHERE DATE_FORMAT(p2.date, '%Y-%m') = DATE_FORMAT(MIN(p.date), '%Y-%m') AND pr.status != 'Cancelled'), 0)) as purchases
+        FROM purchases p
+        WHERE p.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+        GROUP BY DATE_FORMAT(p.date, '%Y-%m'), DATE_FORMAT(p.date, '%b %Y')
+        ORDER BY MIN(p.date) ASC
+      `),
+      req.db.query(`
+        SELECT DATE_FORMAT(created_at, '%b %Y') as month,
+               COALESCE(SUM(CASE WHEN type = 'Stock In' THEN quantity ELSE 0 END), 0) as grnQty,
+               COUNT(CASE WHEN type = 'Stock In' THEN 1 END) as grnCount
+        FROM stock_logs
+        WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m'), DATE_FORMAT(created_at, '%b %Y')
+      `),
+      req.db.query(`
+        SELECT DATE_FORMAT(s.date, '%b %Y') as month,
+               COALESCE(SUM(
+                 (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+                 COALESCE(
+                   NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+                   NULLIF(pr.purchase_price, 0),
+                   (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
+                   0
+                 )
+               ), 0) as cogs
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        JOIN products pr ON si.product_id = pr.id
+        WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+        GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
+      `),
+      req.db.query(`
+        SELECT c.name as name, COUNT(DISTINCT p.id) as value,
                COALESCE(
-                 NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
-                 NULLIF(pr.purchase_price, 0),
-                 (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
-                 0
-               )
-             ), 0) as cogs
-      FROM sale_items si
-      JOIN sales s ON si.sale_id = s.id
-      JOIN products pr ON si.product_id = pr.id
-      WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
-      GROUP BY DATE_FORMAT(s.date, '%Y-%m'), DATE_FORMAT(s.date, '%b %Y')
-    `);
+                 (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
+                  FROM purchase_batches pb 
+                  JOIN products pr2 ON pb.product_id = pr2.id 
+                  WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
+                 GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
+               ) as valuation,
+               GREATEST(0, COALESCE((SELECT SUM(si.total) FROM sale_items si JOIN products pr_s ON si.product_id = pr_s.id WHERE pr_s.category_id = c.id), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN products pr_sr ON sr.product_id = pr_sr.id WHERE pr_sr.category_id = c.id), 0)) as sales,
+               GREATEST(0, COALESCE((SELECT SUM(pi.total) FROM purchase_items pi JOIN products pr_p ON pi.product_id = pr_p.id WHERE pr_p.category_id = c.id), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN products pr_pr ON pr.product_id = pr_pr.id WHERE pr_pr.category_id = c.id AND pr.status != 'Cancelled'), 0)) as purchases
+        FROM categories c
+        LEFT JOIN products p ON c.id = p.category_id
+        LEFT JOIN stock s ON p.id = s.product_id
+        GROUP BY c.id, c.name
+      `),
+      req.db.query(`
+        SELECT w.name as name, COALESCE(SUM(s.quantity), 0) as value
+        FROM warehouses w
+        LEFT JOIN stock s ON w.id = s.warehouse_id
+        GROUP BY w.id, w.name
+      `),
+      req.db.query(`
+        SELECT DATE_FORMAT(s.date, '%d %b') as dateLabel, 
+               GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE s2.date = s.date), 0)) as amount
+        FROM sales s
+        WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 15 DAY)
+        GROUP BY s.date, DATE_FORMAT(s.date, '%d %b')
+        ORDER BY s.date ASC
+      `),
+      req.db.query(`
+        SELECT DATE_FORMAT(created_at, '%d %b') as dateLabel,
+               SUM(CASE WHEN type = 'Stock In' OR (type = 'Adjustment' AND quantity > 0) THEN quantity ELSE 0 END) as stockIn,
+               SUM(CASE WHEN type = 'Stock Out' THEN ABS(quantity) WHEN type = 'Adjustment' AND quantity < 0 THEN ABS(quantity) ELSE 0 END) as stockOut
+        FROM stock_logs
+        WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+        GROUP BY DATE(created_at), DATE_FORMAT(created_at, '%d %b')
+        ORDER BY DATE(created_at) ASC
+      `)
+    ]);
 
     // Merge monthly sales and purchases and calculate Net Profit = Net Sales - COGS
     // Ensure chronological 6-month continuous timeline for proper Line Graph
@@ -247,54 +374,7 @@ export const getDashboardCharts = async (req, res, next) => {
       });
     }
 
-    // 2. Category Distribution (Valuation, products count, sales & purchases per category)
-    const [categoryDist] = await req.db.query(`
-      SELECT c.name as name, COUNT(p.id) as value,
-             COALESCE(
-               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
-                FROM purchase_batches pb 
-                JOIN products pr2 ON pb.product_id = pr2.id 
-                WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
-               GREATEST(0, COALESCE(SUM(s.quantity * p.purchase_price), 0))
-             ) as valuation,
-             GREATEST(0, COALESCE((SELECT SUM(si.total) FROM sale_items si JOIN products pr_s ON si.product_id = pr_s.id WHERE pr_s.category_id = c.id), 0) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN products pr_sr ON sr.product_id = pr_sr.id WHERE pr_sr.category_id = c.id), 0)) as sales,
-             GREATEST(0, COALESCE((SELECT SUM(pi.total) FROM purchase_items pi JOIN products pr_p ON pi.product_id = pr_p.id WHERE pr_p.category_id = c.id), 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr JOIN products pr_pr ON pr.product_id = pr_pr.id WHERE pr_pr.category_id = c.id AND pr.status != 'Cancelled'), 0)) as purchases
-      FROM categories c
-      LEFT JOIN products p ON c.id = p.category_id
-      LEFT JOIN stock s ON p.id = s.product_id
-      GROUP BY c.id, c.name
-    `);
-
-    // 3. Warehouse Distribution (Stock quantity per warehouse)
-    const [warehouseDist] = await req.db.query(`
-      SELECT w.name as name, COALESCE(SUM(s.quantity), 0) as value
-      FROM warehouses w
-      LEFT JOIN stock s ON w.id = s.warehouse_id
-      GROUP BY w.id, w.name
-    `);
-
-    // 4. Daily Sales (Last 15 days, net of returns)
-    const [dailySales] = await req.db.query(`
-      SELECT DATE_FORMAT(s.date, '%d %b') as dateLabel, 
-             GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE s2.date = s.date), 0)) as amount
-      FROM sales s
-      WHERE s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 15 DAY)
-      GROUP BY s.date, DATE_FORMAT(s.date, '%d %b')
-      ORDER BY s.date ASC
-    `);
-
-    // 5. Stock Movement (Logs aggregated by date last 7 days)
-    const [stockMovement] = await req.db.query(`
-      SELECT DATE_FORMAT(created_at, '%d %b') as dateLabel,
-             SUM(CASE WHEN type = 'Stock In' OR (type = 'Adjustment' AND quantity > 0) THEN quantity ELSE 0 END) as stockIn,
-             SUM(CASE WHEN type = 'Stock Out' THEN ABS(quantity) WHEN type = 'Adjustment' AND quantity < 0 THEN ABS(quantity) ELSE 0 END) as stockOut
-      FROM stock_logs
-      WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-      GROUP BY DATE(created_at), DATE_FORMAT(created_at, '%d %b')
-      ORDER BY DATE(created_at) ASC
-    `);
-
-    return res.status(200).json({
+    const responseData = {
       success: true,
       charts: {
         monthlyTrends,
@@ -303,7 +383,15 @@ export const getDashboardCharts = async (req, res, next) => {
         dailySales,
         stockMovement
       }
+    };
+
+    // Store in cache
+    dashboardChartCache.set(cacheKey, {
+      data: responseData,
+      expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS
     });
+
+    return res.status(200).json(responseData);
   } catch (error) {
     next(error);
   }
@@ -410,38 +498,156 @@ export const getSalesReport = async (req, res, next) => {
 // @access  Private
 export const getPurchaseReport = async (req, res, next) => {
   try {
-    const { startDate, endDate, vendorId, paymentStatus } = req.query;
-    let query = `
-      SELECT p.id, p.purchase_no, p.date, v.name as vendor, p.subtotal, p.discount, p.gst_amount, p.total, p.payment_status,
-             COALESCE((SELECT SUM(total_amount) FROM purchase_returns WHERE purchase_id = p.id AND status != 'Cancelled'), 0) as vendor_returns,
-             GREATEST(0, p.total - COALESCE((SELECT SUM(total_amount) FROM purchase_returns WHERE purchase_id = p.id AND status != 'Cancelled'), 0)) as net_total
-      FROM purchases p
-      JOIN vendors v ON p.vendor_id = v.id
-      WHERE 1=1
-    `;
-    const params = [];
+    const { startDate, endDate, vendorId, paymentStatus, categoryId, brandId, productId } = req.query;
+
+    let baseFilter = ` WHERE 1=1`;
+    const filterParams = [];
 
     if (startDate) {
-      query += ` AND DATE(p.date) >= ?`;
-      params.push(startDate);
+      baseFilter += ` AND DATE(p.date) >= ?`;
+      filterParams.push(startDate);
     }
     if (endDate) {
-      query += ` AND DATE(p.date) <= ?`;
-      params.push(endDate);
+      baseFilter += ` AND DATE(p.date) <= ?`;
+      filterParams.push(endDate);
     }
     if (vendorId && vendorId !== 'all') {
-      query += ` AND p.vendor_id = ?`;
-      params.push(Number(vendorId));
+      baseFilter += ` AND p.vendor_id = ?`;
+      filterParams.push(Number(vendorId));
     }
     if (paymentStatus && paymentStatus !== 'all') {
-      query += ` AND p.payment_status = ?`;
-      params.push(paymentStatus);
+      baseFilter += ` AND p.payment_status = ?`;
+      filterParams.push(paymentStatus);
+    }
+    if (categoryId && categoryId !== 'all') {
+      baseFilter += ` AND pr.category_id = ?`;
+      filterParams.push(Number(categoryId));
+    }
+    if (brandId && brandId !== 'all') {
+      baseFilter += ` AND (pr.brand = ? OR pr.brand_id = ?)`;
+      filterParams.push(brandId, isNaN(Number(brandId)) ? 0 : Number(brandId));
+    }
+    if (productId && productId !== 'all') {
+      baseFilter += ` AND pi.product_id = ?`;
+      filterParams.push(Number(productId));
     }
 
-    query += ` ORDER BY p.date DESC, p.id DESC`;
+    // Query 1: Line items for tabular report (one row per product in multi-product invoices)
+    const lineItemsQuery = `
+      SELECT 
+        CONCAT(p.id, '-', COALESCE(pi.id, 0)) as id,
+        p.id as purchase_id,
+        p.purchase_no,
+        p.date,
+        v.name as vendor,
+        p.vendor_id,
+        COALESCE(pr.name, 'N/A') as product_name,
+        pi.product_id,
+        COALESCE(pi.quantity, 0) as quantity,
+        COALESCE(pr.unit, 'Pcs') as unit,
+        COALESCE(pi.purchase_price, 0) as purchase_price,
+        0.00 as discount,
+        ROUND(COALESCE(pi.quantity, 0) * COALESCE(pi.purchase_price, 0) * (COALESCE(pi.gst, 0) / 100), 2) as tax,
+        COALESCE(pi.gst, 0) as tax_percent,
+        COALESCE(pi.total, (COALESCE(pi.quantity, 0) * COALESCE(pi.purchase_price, 0))) as line_amount,
+        p.payment_status,
+        p.subtotal as invoice_subtotal,
+        p.gst_amount as invoice_gst,
+        p.discount as invoice_discount,
+        p.total as invoice_total,
+        p.paid_amount as invoice_paid_amount,
+        COALESCE((SELECT SUM(total_amount) FROM purchase_returns WHERE purchase_id = p.id AND status != 'Cancelled'), 0) as vendor_returns,
+        GREATEST(0, p.total - COALESCE((SELECT SUM(total_amount) FROM purchase_returns WHERE purchase_id = p.id AND status != 'Cancelled'), 0)) as net_total
+      FROM purchases p
+      JOIN vendors v ON p.vendor_id = v.id
+      LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
+      LEFT JOIN products pr ON pi.product_id = pr.id
+      ${baseFilter}
+      ORDER BY p.date DESC, p.id DESC, pi.id ASC
+    `;
 
-    const [report] = await req.db.query(query, params);
-    return res.status(200).json({ success: true, report });
+    const [rows] = await req.db.query(lineItemsQuery, filterParams);
+
+    // Query 2: Summary aggregated at invoice level (distinct invoices, avoiding product duplication)
+    let summaryFilter = ` WHERE 1=1`;
+    const summaryParams = [];
+
+    if (startDate) {
+      summaryFilter += ` AND DATE(p.date) >= ?`;
+      summaryParams.push(startDate);
+    }
+    if (endDate) {
+      summaryFilter += ` AND DATE(p.date) <= ?`;
+      summaryParams.push(endDate);
+    }
+    if (vendorId && vendorId !== 'all') {
+      summaryFilter += ` AND p.vendor_id = ?`;
+      summaryParams.push(Number(vendorId));
+    }
+    if (paymentStatus && paymentStatus !== 'all') {
+      summaryFilter += ` AND p.payment_status = ?`;
+      summaryParams.push(paymentStatus);
+    }
+    if ((categoryId && categoryId !== 'all') || (brandId && brandId !== 'all') || (productId && productId !== 'all')) {
+      summaryFilter += ` AND EXISTS (
+        SELECT 1 FROM purchase_items pi_sub
+        LEFT JOIN products pr_sub ON pi_sub.product_id = pr_sub.id
+        WHERE pi_sub.purchase_id = p.id
+      `;
+      if (categoryId && categoryId !== 'all') {
+        summaryFilter += ` AND pr_sub.category_id = ?`;
+        summaryParams.push(Number(categoryId));
+      }
+      if (brandId && brandId !== 'all') {
+        summaryFilter += ` AND (pr_sub.brand = ? OR pr_sub.brand_id = ?)`;
+        summaryParams.push(brandId, isNaN(Number(brandId)) ? 0 : Number(brandId));
+      }
+      if (productId && productId !== 'all') {
+        summaryFilter += ` AND pi_sub.product_id = ?`;
+        summaryParams.push(Number(productId));
+      }
+      summaryFilter += `)`;
+    }
+
+    const summaryQuery = `
+      SELECT 
+        COUNT(DISTINCT p.id) as total_invoices,
+        COALESCE(SUM(p.subtotal), 0) as gross_subtotal,
+        COALESCE(SUM(p.gst_amount), 0) as total_gst,
+        COALESCE(SUM(p.discount), 0) as total_discount,
+        COALESCE(SUM(p.total), 0) as gross_purchases,
+        COALESCE(SUM(p.paid_amount), 0) as total_paid,
+        COALESCE(SUM(
+          CASE 
+            WHEN p.payment_status = 'Paid' THEN 0 
+            WHEN p.payment_status = 'Void' THEN 0 
+            ELSE GREATEST(0, p.total - COALESCE(p.paid_amount, 0) - COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND pr.status != 'Cancelled'), 0)) 
+          END
+        ), 0) as supplier_outstanding,
+        COALESCE(SUM((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.purchase_id = p.id AND pr.status != 'Cancelled')), 0) as vendor_returns
+      FROM purchases p
+      ${summaryFilter}
+    `;
+
+    const [summaryRows] = await req.db.query(summaryQuery, summaryParams);
+    const sumRow = summaryRows[0] || {};
+    const grossPurchases = Number(sumRow.gross_purchases || 0);
+    const vendorReturns = Number(sumRow.vendor_returns || 0);
+    const netPurchases = Math.max(0, grossPurchases - vendorReturns);
+
+    const summary = {
+      totalPurchases: Number(netPurchases.toFixed(2)),
+      grossSubtotal: Number(Number(sumRow.gross_subtotal || 0).toFixed(2)),
+      totalGst: Number(Number(sumRow.total_gst || 0).toFixed(2)),
+      totalDiscount: Number(Number(sumRow.total_discount || 0).toFixed(2)),
+      vendorReturns: Number(vendorReturns.toFixed(2)),
+      totalExpenses: Number(netPurchases.toFixed(2)),
+      supplierOutstanding: Number(Number(sumRow.supplier_outstanding || 0).toFixed(2)),
+      totalInvoices: Number(sumRow.total_invoices || 0),
+      totalProducts: rows.length
+    };
+
+    return res.status(200).json({ success: true, report: rows, summary });
   } catch (error) {
     next(error);
   }
@@ -465,6 +671,7 @@ export const getSalesDashboardData = async (req, res, next) => {
       `SELECT COALESCE(SUM(
         (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
         COALESCE(
+          NULLIF(si.purchase_cost, 0),
           NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
           NULLIF(p.purchase_price, 0),
           (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
@@ -498,6 +705,7 @@ export const getSalesDashboardData = async (req, res, next) => {
       `SELECT COALESCE(SUM(
         (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
         COALESCE(
+          NULLIF(si.purchase_cost, 0),
           NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
           NULLIF(p.purchase_price, 0),
           (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),

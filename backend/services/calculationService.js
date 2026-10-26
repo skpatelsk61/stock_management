@@ -274,6 +274,7 @@ export const calculateCOGS = async (db, filters = {}) => {
     SELECT COALESCE(SUM(
       (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
       COALESCE(
+        NULLIF(si.purchase_cost, 0),
         NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
         NULLIF(p.purchase_price, 0),
         (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
@@ -325,6 +326,7 @@ export const calculateMarginBreakdown = async (db, filters = {}) => {
       COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0) as returned_qty,
       COALESCE((SELECT SUM(refund_amount) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0) as returned_amt,
       COALESCE(
+        NULLIF(si.purchase_cost, 0),
         NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
         NULLIF(p.purchase_price, 0),
         (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
@@ -604,49 +606,61 @@ export const getTopPurchasedProducts = async (db, filters = {}, limit = 10) => {
  * 9. Unified Executive Dashboard KPIs
  */
 export const getExecutiveDashboardKPIs = async (db, filters = {}) => {
-  const sales = await calculateTotalSales(db, filters);
-  const purchases = await calculatePurchaseExpenses(db, filters);
-  const cogs = await calculateCOGS(db, filters);
-  const stockAdjustments = await calculateStockAdjustments(db, filters);
+  const [
+    sales,
+    purchases,
+    cogs,
+    stockAdjustments,
+    stockDestroy,
+    inventoryValuation,
+    stockCounts,
+    prodCountRes,
+    catCountRes,
+    vendorCountRes,
+    activeVendRes,
+    custCountRes,
+    activeCustRes,
+    pendingPaymentsRes,
+    topSelling,
+    topPurchased
+  ] = await Promise.all([
+    calculateTotalSales(db, filters),
+    calculatePurchaseExpenses(db, filters),
+    calculateCOGS(db, filters),
+    calculateStockAdjustments(db, filters),
+    calculateStockDestroy(db, filters),
+    calculateInventoryValuation(db, filters),
+    calculateStockCounts(db, filters),
+    db.query('SELECT COUNT(*) as count FROM products'),
+    db.query('SELECT COUNT(*) as count FROM categories'),
+    db.query('SELECT COUNT(*) as count FROM vendors'),
+    db.query('SELECT COUNT(*) as count FROM vendors WHERE status = "Active"').catch(() => [[{ count: 0 }]]),
+    db.query('SELECT COUNT(*) as count FROM customers WHERE name != "Walk-in Customer"'),
+    db.query('SELECT COUNT(*) as count FROM customers WHERE status = "Active" AND name != "Walk-in Customer"').catch(() => [[{ count: 0 }]]),
+    db.query(`SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE payment_status != 'Paid'`),
+    getTopSellingProducts(db, filters, 5),
+    getTopPurchasedProducts(db, filters, 5)
+  ]);
+
+  const prodCount = prodCountRes[0];
+  const catCount = catCountRes[0];
+  const vendorCount = vendorCountRes[0];
+  const activeVendorCount = activeVendRes[0];
+  const custCount = custCountRes[0];
+  const activeCustCount = activeCustRes[0];
+  const pendingPayments = pendingPaymentsRes[0];
+
   const grossProfit = Number((sales.netSales - cogs).toFixed(2));
-  const stockDestroy = await calculateStockDestroy(db, filters);
   const operatingExpenses = Number((stockDestroy.destroyCost || 0).toFixed(2));
   const netProfit = Math.max(0, Number((grossProfit - operatingExpenses).toFixed(2)));
-  const inventoryValuation = await calculateInventoryValuation(db, filters);
-  const stockCounts = await calculateStockCounts(db, filters);
-
-  const [prodCount] = await db.query('SELECT COUNT(*) as count FROM products');
-  const [catCount] = await db.query('SELECT COUNT(*) as count FROM categories');
-  const [vendorCount] = await db.query('SELECT COUNT(*) as count FROM vendors');
-  let activeVendorCount = vendorCount;
-  try {
-    const [aVend] = await db.query('SELECT COUNT(*) as count FROM vendors WHERE status = "Active"');
-    activeVendorCount = aVend;
-  } catch (e) {}
-
-  const [custCount] = await db.query('SELECT COUNT(*) as count FROM customers WHERE name != "Walk-in Customer"');
-  let activeCustCount = custCount;
-  try {
-    const [aCust] = await db.query('SELECT COUNT(*) as count FROM customers WHERE status = "Active" AND name != "Walk-in Customer"');
-    activeCustCount = aCust;
-  } catch (e) {}
-
-  const [pendingPayments] = await db.query(`
-    SELECT COALESCE(SUM(total), 0) as total 
-    FROM purchases 
-    WHERE payment_status != 'Paid'
-  `);
-
-  const topSelling = await getTopSellingProducts(db, filters, 5);
-  const topPurchased = await getTopPurchasedProducts(db, filters, 5);
 
   return {
-    totalProducts: prodCount[0].count,
-    totalCategories: catCount[0].count,
-    totalVendors: vendorCount[0].count,
-    activeVendors: activeVendorCount[0]?.count || vendorCount[0].count,
-    totalCustomers: custCount[0].count,
-    activeCustomers: activeCustCount[0]?.count || custCount[0].count,
+    totalProducts: prodCount[0]?.count || 0,
+    totalCategories: catCount[0]?.count || 0,
+    totalVendors: vendorCount[0]?.count || 0,
+    activeVendors: activeVendorCount[0]?.count || vendorCount[0]?.count || 0,
+    totalCustomers: custCount[0]?.count || 0,
+    activeCustomers: activeCustCount[0]?.count || custCount[0]?.count || 0,
     totalPurchases: purchases.netPurchaseExpenses,
     grossPurchases: purchases.grossPurchases,
     netPurchaseSubtotalExclTax: purchases.netSubtotalExclTax,

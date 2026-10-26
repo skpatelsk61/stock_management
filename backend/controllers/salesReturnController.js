@@ -1,6 +1,7 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
 import { syncCustomerBalances } from './borrowController.js';
+import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
 
 // @desc    Search Sales Invoices by Invoice No, Customer Name, or Phone Number
 // @route   GET /api/sales-returns/search-invoice
@@ -382,23 +383,48 @@ export const createSalesReturn = async (req, res, next) => {
           );
         }
 
-        // Synchronize purchase_batches for instant Product catalog & stock report updates
-        const [existingPb] = await connection.query(
-          'SELECT id FROM purchase_batches WHERE product_id = ? ORDER BY id DESC LIMIT 1',
-          [pId]
+        // Check if there is an allocated batch for this sale item
+        const [saleItemRows] = await connection.query(
+          'SELECT batch_id, batch_number FROM sale_items WHERE sale_id = ? AND product_id = ? ORDER BY id ASC',
+          [sale.id, pId]
         );
-        if (existingPb.length > 0) {
-          await connection.query(
-            'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
-            [returnQty, existingPb[0].id]
+        let restoredToBatch = false;
+        if (saleItemRows.length > 0 && saleItemRows[0].batch_id) {
+          const [targetBatch] = await connection.query(
+            'SELECT id FROM purchase_batches WHERE id = ?',
+            [saleItemRows[0].batch_id]
           );
-        } else {
-          await connection.query(
-            `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, warehouse_id)
-             VALUES (?, ?, ?, ?, CURRENT_DATE(), ?)`,
-            [pId, `RETURN-RESTORE-${Date.now()}`, returnQty, returnQty, warehouseId]
-          );
+          if (targetBatch.length > 0) {
+            await connection.query(
+              'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+              [returnQty, targetBatch[0].id]
+            );
+            restoredToBatch = true;
+          }
         }
+
+        if (!restoredToBatch) {
+          // If no specific batch found, restore to oldest active batch or latest batch
+          const [existingPb] = await connection.query(
+            'SELECT id FROM purchase_batches WHERE product_id = ? ORDER BY purchase_date ASC, id ASC LIMIT 1',
+            [pId]
+          );
+          if (existingPb.length > 0) {
+            await connection.query(
+              'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+              [returnQty, existingPb[0].id]
+            );
+          } else {
+            await connection.query(
+              `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, warehouse_id)
+               VALUES (?, ?, ?, ?, CURRENT_DATE(), ?)`,
+              [pId, `RETURN-RESTORE-${Date.now()}`, returnQty, returnQty, warehouseId]
+            );
+          }
+        }
+
+        // Reconcile FIFO state
+        await syncProductFifoState(connection, pId);
 
         await connection.query(
           `INSERT INTO stock_logs (product_id, warehouse_id, type, quantity, reference_no, notes, user_id)
@@ -642,6 +668,8 @@ export const deleteSalesReturn = async (req, res, next) => {
         [ret.quantity, existingPb[0].id]
       );
     }
+
+    await syncProductFifoState(connection, ret.product_id);
 
     // Log stock reversal
     await connection.query(
