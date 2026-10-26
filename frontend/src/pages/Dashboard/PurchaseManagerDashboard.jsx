@@ -26,13 +26,19 @@ import { useAppSelector } from '../../store/hooks';
 import { reportsAPI, stockAPI, purchasesAPI, vendorsAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
 
+let cachedPMState = null;
+try {
+  const stored = sessionStorage.getItem('cached_pm_state');
+  if (stored) cachedPMState = JSON.parse(stored);
+} catch (e) {}
+
 const PurchaseManagerDashboard = () => {
   const { user } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedPMState);
   const [refreshing, setRefreshing] = useState(false);
-  const [kpis, setKpis] = useState({
+  const [kpis, setKpis] = useState(cachedPMState?.kpis || {
     totalPurchases: 0,
     inventoryValuation: 0,
     lowStock: 0,
@@ -41,20 +47,20 @@ const PurchaseManagerDashboard = () => {
     pendingInvoices: 0
   });
 
-  const [alerts, setAlerts] = useState([]);
-  const [purchaseTrend, setPurchaseTrend] = useState([]);
+  const [alerts, setAlerts] = useState(cachedPMState?.alerts || []);
+  const [purchaseTrend, setPurchaseTrend] = useState(cachedPMState?.purchaseTrend || []);
 
   const loadPurchaseData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (!cachedPMState) setLoading(true);
 
     try {
       const [kpiRes, alertRes, purchaseRes, vendorRes, chartRes] = await Promise.all([
-        reportsAPI.getKPIs().catch(() => null),
+        reportsAPI.getKPIs(isRefresh ? { refresh: true } : {}).catch(() => null),
         stockAPI.getAlerts().catch(() => null),
-        purchasesAPI.getAll().catch(() => null),
+        purchasesAPI.getAll({ limit: 10 }).catch(() => null),
         vendorsAPI.getAll().catch(() => null),
-        reportsAPI.getCharts().catch(() => null)
+        reportsAPI.getCharts(isRefresh ? { refresh: true } : {}).catch(() => null)
       ]);
 
       if (kpiRes?.success && kpiRes.kpis) {
@@ -96,6 +102,21 @@ const PurchaseManagerDashboard = () => {
       } else {
         setPurchaseTrend([]);
       }
+
+      setTimeout(() => {
+        setKpis(currentKpis => {
+          const newState = {
+            kpis: currentKpis,
+            alerts: (alertRes?.success && alertRes.alerts) ? (Array.isArray(alertRes.alerts) ? alertRes.alerts : (alertRes.alerts.lowStock || [])).slice(0, 5) : [],
+            purchaseTrend: (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends)) ? chartRes.charts.monthlyTrends.map(t => ({ day: t.name, Purchases: t.Purchases || 0, GRN: t.GRN || 0 })) : []
+          };
+          cachedPMState = newState;
+          try {
+            sessionStorage.setItem('cached_pm_state', JSON.stringify(newState));
+          } catch (e) {}
+          return currentKpis;
+        });
+      }, 50);
     } catch (err) {
       console.error('Purchase Dashboard fetch error:', err);
     } finally {

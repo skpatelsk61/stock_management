@@ -1573,7 +1573,34 @@ export const createPurchase = async (req, res, next) => {
           console.warn('[Purchase Valuation Layer] Warning:', pve.message);
         }
 
-        // Sync FIFO active batch Expiry Date and MRP on Product master
+        // Authoritatively update product master with latest effective selling price, purchase price, MRP
+        const prodMasterUpdates = [];
+        const prodMasterVals = [];
+        if (itemSellingPrice > 0) {
+          prodMasterUpdates.push('selling_price = ?');
+          prodMasterVals.push(itemSellingPrice);
+        }
+        if (itemMrp > 0) {
+          prodMasterUpdates.push('mrp = ?');
+          prodMasterVals.push(itemMrp);
+        }
+        if (itemPurchasePrice > 0) {
+          prodMasterUpdates.push('purchase_price = ?');
+          prodMasterVals.push(itemPurchasePrice);
+        }
+        if (itemGst >= 0) {
+          prodMasterUpdates.push('gst = ?');
+          prodMasterVals.push(itemGst);
+        }
+        if (prodMasterUpdates.length > 0) {
+          prodMasterVals.push(targetProductId);
+          await connection.query(
+            `UPDATE products SET ${prodMasterUpdates.join(', ')} WHERE id = ?`,
+            prodMasterVals
+          );
+        }
+
+        // Sync FIFO active batch Expiry Date and active cost on Product master
         await syncProductFifoState(connection, targetProductId);
       }
     }
@@ -1752,8 +1779,32 @@ export const deletePurchase = async (req, res, next) => {
     const { purchase_no, warehouse_id, vendor_id, total, payment_status, purchase_order_id, grn_id } = purchases[0];
     const isLinkedToReceipt = !!grn_id;
 
-    // Fetch items
-    const [items] = await connection.query('SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?', [id]);
+    // If stock was inwarded directly by this purchase invoice (no linked GRN), deduct stock and clean up batches
+    if (!isLinkedToReceipt) {
+      const [batches] = await connection.query(
+        'SELECT id, product_id, remaining_quantity FROM purchase_batches WHERE purchase_id = ?',
+        [id]
+      );
+      for (const b of batches) {
+        const pId = Number(b.product_id);
+        const remQty = Number(b.remaining_quantity || 0);
+        if (remQty > 0) {
+          await connection.query(
+            'UPDATE stock SET quantity = GREATEST(0, quantity - ?) WHERE product_id = ? AND warehouse_id = ?',
+            [remQty, pId, warehouse_id]
+          );
+          await connection.query(
+            `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id)
+             VALUES (?, ?, ?, 'Stock Out', ?, ?, 'Purchase Invoice Cancelled', ?)`,
+            [pId, warehouse_id, vendor_id, -remQty, purchase_no, req.user ? req.user.id : 1]
+          );
+        }
+      }
+      await connection.query('DELETE FROM purchase_batches WHERE purchase_id = ?', [id]);
+      for (const item of items) {
+        await syncProductFifoState(connection, Number(item.product_id));
+      }
+    }
 
     // Delete items, payments and invoice
     await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);

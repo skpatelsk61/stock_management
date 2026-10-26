@@ -30,13 +30,19 @@ import {
   CubeIcon,
 } from '@heroicons/react/24/outline';
 import { useAppSelector } from '../../store/hooks';
-import { reportsAPI, stockAPI } from '../../services/api';
+import { reportsAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
 import PurchaseManagerDashboard from './PurchaseManagerDashboard';
 import SalesManagerDashboard from './SalesManagerDashboard';
 import PurchaseEmployeeDashboard from './PurchaseEmployeeDashboard';
 import SalesEmployeeDashboard from './SalesEmployeeDashboard';
 import GeneralEmployeeDashboard from './GeneralEmployeeDashboard';
+
+let cachedDashboardState = null;
+try {
+  const stored = sessionStorage.getItem('cached_dashboard_state');
+  if (stored) cachedDashboardState = JSON.parse(stored);
+} catch (e) {}
 
 const Dashboard = () => {
   const { user } = useAppSelector((state) => state.auth);
@@ -65,11 +71,11 @@ const Dashboard = () => {
     return <GeneralEmployeeDashboard />;
   }
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedDashboardState);
   const [dbOffline, setDbOffline] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [kpis, setKpis] = useState({
+  const [kpis, setKpis] = useState(cachedDashboardState?.kpis || {
     totalSales: 0,
     totalPurchases: 0,
     lowStock: 0,
@@ -84,33 +90,26 @@ const Dashboard = () => {
     netInventoryAdjustment: 0,
   });
 
-  const [todayKpis, setTodayKpis] = useState({ totalSales: 0, totalOrders: 0, profit: 0 });
+  const [todayKpis, setTodayKpis] = useState(cachedDashboardState?.todayKpis || { totalSales: 0, totalOrders: 0, profit: 0 });
 
-  const [categoryBreakdownData, setCategoryBreakdownData] = useState([]);
-  const [monthlySalesTrend, setMonthlySalesTrend] = useState([]);
+  const [categoryBreakdownData, setCategoryBreakdownData] = useState(cachedDashboardState?.categoryBreakdownData || []);
+  const [monthlySalesTrend, setMonthlySalesTrend] = useState(cachedDashboardState?.monthlySalesTrend || []);
   const [analysisMode, setAnalysisMode] = useState('overview'); // 'overview' | 'sales' | 'purchases' | 'inventory'
 
   const fetchDashboardData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    const todayStr = (() => {
-      const d = new Date();
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    })();
+    else if (!cachedDashboardState) setLoading(true);
 
     try {
-      const [kpiRes, alertRes, chartRes, todayKpiRes] = await Promise.all([
-        reportsAPI.getKPIs(),
-        stockAPI.getAlerts(),
-        reportsAPI.getCharts().catch(() => null),
-        reportsAPI.getKPIs({ startDate: todayStr, endDate: todayStr }).catch(() => null),
+      const [kpiRes, chartRes] = await Promise.all([
+        reportsAPI.getKPIs(isRefresh ? { refresh: true } : {}),
+        reportsAPI.getCharts(isRefresh ? { refresh: true } : {}).catch(() => null),
       ]);
 
       let updatedKpis = { ...kpis };
+      let mappedDist = [];
+      let trends = [];
+      let updatedTodayKpis = { ...todayKpis };
 
       if (kpiRes?.success && kpiRes.kpis) {
         updatedKpis = {
@@ -132,7 +131,7 @@ const Dashboard = () => {
         const catDistList = kpiRes.categoryDist || chartRes?.charts?.categoryDist;
         if (catDistList && catDistList.length > 0) {
           const colors = ['#6366F1', '#F59E0B', '#10B981', '#3B82F6', '#EC4899', '#8B5CF6'];
-          const mappedDist = catDistList
+          mappedDist = catDistList
             .filter(c => Number(c.value) > 0 || Number(c.sales) > 0 || Number(c.purchases) > 0 || Number(c.valuation) > 0)
             .map((c, i) => ({
               name: c.name,
@@ -150,20 +149,8 @@ const Dashboard = () => {
         setCategoryBreakdownData([]);
       }
 
-      if (alertRes?.success && alertRes.alerts) {
-        if (alertRes.alerts.lowStock) {
-          updatedKpis.lowStock = alertRes.alerts.lowStock.length;
-        }
-        if (alertRes.alerts.outOfStock) {
-          updatedKpis.outOfStock = alertRes.alerts.outOfStock.length;
-        }
-        if (alertRes.alerts.nearExpiry) {
-          updatedKpis.nearExpiry = alertRes.alerts.nearExpiry.length;
-        }
-      }
-
       if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
-        let trends = [...chartRes.charts.monthlyTrends];
+        trends = [...chartRes.charts.monthlyTrends];
         if (trends.length < 6) {
           const now = new Date();
           const full6Months = [];
@@ -194,26 +181,42 @@ const Dashboard = () => {
             Purchases: 0
           });
         }
+        trends = fallbackMonths;
         setMonthlySalesTrend(fallbackMonths);
       }
 
-      // Update Today's Store Summary KPIs
-      if (todayKpiRes?.success && todayKpiRes.kpis) {
-        setTodayKpis({
-          totalSales: todayKpiRes.kpis.totalSales ?? 0,
-          totalOrders: todayKpiRes.kpis.totalOrders ?? 0,
-          grossProfit: todayKpiRes.kpis.grossProfit ?? todayKpiRes.kpis.profit ?? 0,
-          profit: todayKpiRes.kpis.grossProfit ?? todayKpiRes.kpis.profit ?? 0,
-        });
+      // Update Today's Store Summary KPIs directly from embedded today object
+      if (kpiRes?.today) {
+        updatedTodayKpis = {
+          totalSales: kpiRes.today.totalSales ?? 0,
+          totalOrders: kpiRes.today.totalOrders ?? 0,
+          grossProfit: kpiRes.today.grossProfit ?? kpiRes.today.profit ?? 0,
+          profit: kpiRes.today.grossProfit ?? kpiRes.today.profit ?? 0,
+        };
+        setTodayKpis(updatedTodayKpis);
       }
 
       setKpis(updatedKpis);
       setDbOffline(false);
+
+      // Save into cache for instant load on subsequent navigations
+      const newState = {
+        kpis: updatedKpis,
+        todayKpis: updatedTodayKpis,
+        categoryBreakdownData: mappedDist,
+        monthlySalesTrend: trends
+      };
+      cachedDashboardState = newState;
+      try {
+        sessionStorage.setItem('cached_dashboard_state', JSON.stringify(newState));
+      } catch (e) {}
     } catch (error) {
       console.warn('Dashboard API failed', error);
-      setDbOffline(true);
-      setCategoryBreakdownData([]);
-      setMonthlySalesTrend([]);
+      if (!cachedDashboardState) {
+        setDbOffline(true);
+        setCategoryBreakdownData([]);
+        setMonthlySalesTrend([]);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

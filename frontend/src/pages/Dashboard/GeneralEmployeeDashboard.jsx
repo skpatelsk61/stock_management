@@ -16,49 +16,51 @@ import { useAppSelector } from '../../store/hooks';
 import { reportsAPI, salesAPI, purchasesAPI, stockAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
 
+let cachedGEDState = null;
+try {
+  const stored = sessionStorage.getItem('cached_ged_state');
+  if (stored) cachedGEDState = JSON.parse(stored);
+} catch (e) {}
+
 const GeneralEmployeeDashboard = () => {
   const { user } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedGEDState);
   const [refreshing, setRefreshing] = useState(false);
-  const [kpis, setKpis] = useState({
+  const [kpis, setKpis] = useState(cachedGEDState?.kpis || {
     mySalesToday: 0,
     totalPurchasesToday: 0,
     totalOrdersToday: 0,
     lowStockCount: 0,
   });
 
-  const [recentSales, setRecentSales] = useState([]);
-  const [recentPurchases, setRecentPurchases] = useState([]);
-  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const [recentSales, setRecentSales] = useState(cachedGEDState?.recentSales || []);
+  const [recentPurchases, setRecentPurchases] = useState(cachedGEDState?.recentPurchases || []);
+  const [lowStockAlerts, setLowStockAlerts] = useState(cachedGEDState?.lowStockAlerts || []);
 
   const loadData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (!cachedGEDState) setLoading(true);
 
     try {
       const [kpiRes, salesRes, purchaseRes, stockAlertRes] = await Promise.all([
-        reportsAPI.getKPIs().catch(() => null),
-        salesAPI.getAll().catch(() => null),
-        purchasesAPI.getAll().catch(() => null),
+        reportsAPI.getKPIs(isRefresh ? { refresh: true } : {}).catch(() => null),
+        salesAPI.getAll({ limit: 5 }).catch(() => null),
+        purchasesAPI.getAll({ limit: 5 }).catch(() => null),
         stockAPI.getAlerts().catch(() => null)
       ]);
 
-      let salesTotal = 0;
-      let salesCount = 0;
+      let salesList = [];
       if (salesRes?.success && salesRes.sales) {
-        const salesList = salesRes.sales || [];
-        salesCount = salesList.length;
-        salesTotal = salesList.reduce((acc, curr) => acc + Number(curr.grand_total || curr.total || 0), 0);
-        setRecentSales(salesList.slice(0, 5));
+        salesList = salesRes.sales.slice(0, 5);
+        setRecentSales(salesList);
       }
 
-      let purchaseTotal = 0;
+      let purList = [];
       if (purchaseRes?.success && purchaseRes.purchases) {
-        const purList = purchaseRes.purchases || [];
-        purchaseTotal = purList.reduce((acc, curr) => acc + Number(curr.total || 0), 0);
-        setRecentPurchases(purList.slice(0, 5));
+        purList = purchaseRes.purchases.slice(0, 5);
+        setRecentPurchases(purList);
       }
 
       let lowStockItems = [];
@@ -69,12 +71,25 @@ const GeneralEmployeeDashboard = () => {
         setLowStockAlerts(lowStockItems.slice(0, 5));
       }
 
-      setKpis({
-        mySalesToday: salesTotal || kpiRes?.kpis?.totalSales || 0,
-        totalPurchasesToday: purchaseTotal || kpiRes?.kpis?.totalPurchases || 0,
-        totalOrdersToday: salesCount || kpiRes?.kpis?.totalOrders || 0,
-        lowStockCount: lowStockItems.length || kpiRes?.kpis?.lowStock || 0,
-      });
+      const nextKpis = {
+        mySalesToday: kpiRes?.today?.totalSales ?? kpiRes?.kpis?.totalSales ?? 0,
+        totalPurchasesToday: kpiRes?.kpis?.totalPurchases ?? 0,
+        totalOrdersToday: kpiRes?.today?.totalOrders ?? kpiRes?.kpis?.totalOrders ?? 0,
+        lowStockCount: kpiRes?.kpis?.lowStock ?? lowStockItems.length ?? 0,
+      };
+
+      setKpis(nextKpis);
+
+      const newState = {
+        kpis: nextKpis,
+        recentSales: salesList,
+        recentPurchases: purList,
+        lowStockAlerts: lowStockItems.slice(0, 5)
+      };
+      cachedGEDState = newState;
+      try {
+        sessionStorage.setItem('cached_ged_state', JSON.stringify(newState));
+      } catch (e) {}
 
     } catch (err) {
       console.error('General Employee Dashboard load error:', err);

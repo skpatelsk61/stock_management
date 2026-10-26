@@ -33,6 +33,8 @@ import { initializeTenantPools } from './config/tenantDb.js';
 import { startCleanupScheduler } from './services/cleanupService.js';
 import { initBackupScheduler } from './services/backupService.js';
 
+import { clearDashboardCache } from './controllers/reportController.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -45,6 +47,19 @@ const PORT = process.env.PORT || 5000;
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Auto-invalidate dashboard cache on data-modifying mutations
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    res.on('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        const dbName = req.tenantDbName || req.headers['x-tenant-id'];
+        clearDashboardCache(dbName);
+      }
+    });
+  }
+  next();
+});
 
 // CORS setup
 app.use(cors({

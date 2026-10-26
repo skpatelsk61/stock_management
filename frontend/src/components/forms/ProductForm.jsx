@@ -180,6 +180,18 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
 
   useEffect(() => {
     fetchMasters();
+
+    const handleMasterUpdate = () => {
+      invalidateProductMastersCache();
+      fetchMasters(true);
+    };
+
+    window.addEventListener('category-updated', handleMasterUpdate);
+    window.addEventListener('brand-updated', handleMasterUpdate);
+    return () => {
+      window.removeEventListener('category-updated', handleMasterUpdate);
+      window.removeEventListener('brand-updated', handleMasterUpdate);
+    };
   }, []);
 
   // Selected Main Category Object

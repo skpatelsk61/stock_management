@@ -49,6 +49,18 @@ export const runCategorySchemaMigrations = async (pool) => {
       console.warn('[Schema Migration] brands columns check notice:', bErr.message);
     }
 
+    // 2b. Auto-heal / synchronize brands.category_id with parent sub_category_id
+    try {
+      await pool.query(`
+        UPDATE brands b
+        JOIN sub_categories sc ON b.sub_category_id = sc.id
+        SET b.category_id = sc.category_id
+        WHERE b.sub_category_id IS NOT NULL AND (b.category_id IS NULL OR b.category_id != sc.category_id)
+      `);
+    } catch (healErr) {
+      console.warn('[Schema Migration] brands category auto-heal notice:', healErr.message);
+    }
+
     // 3. Ensure columns sub_category_id and brand_id exist on products table
     const [cols] = await pool.query('DESCRIBE products');
     const colNames = cols.map(c => c.Field);
@@ -83,6 +95,79 @@ export const runCategorySchemaMigrations = async (pool) => {
       }
     } catch (e) {
       console.warn('[Schema Migration] sale_payments table check:', e.message);
+    }
+
+    // 4b. Ensure sale_items has batch_id, purchase_cost, and gross_profit for FIFO batch & margin tracking
+    try {
+      const [siCols] = await pool.query('DESCRIBE sale_items');
+      const siColNames = siCols.map(c => c.Field);
+      if (!siColNames.includes('batch_id')) {
+        await pool.query('ALTER TABLE sale_items ADD COLUMN batch_id INT NULL AFTER mrp');
+      }
+      if (!siColNames.includes('purchase_cost')) {
+        await pool.query('ALTER TABLE sale_items ADD COLUMN purchase_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER batch_number');
+      }
+      if (!siColNames.includes('gross_profit')) {
+        await pool.query('ALTER TABLE sale_items ADD COLUMN gross_profit DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER purchase_cost');
+      }
+
+      // Safe backfill for historical completed sales (preserves immutable historical records)
+      await pool.query(`
+        UPDATE sale_items si
+        SET si.purchase_cost = COALESCE(
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.id = si.batch_id LIMIT 1), 0),
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+          NULLIF((SELECT p.purchase_price FROM products p WHERE p.id = si.product_id LIMIT 1), 0),
+          0.00
+        ),
+        si.gross_profit = ROUND((si.selling_price - COALESCE(
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.id = si.batch_id LIMIT 1), 0),
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+          NULLIF((SELECT p.purchase_price FROM products p WHERE p.id = si.product_id LIMIT 1), 0),
+          0.00
+        )) * si.quantity, 2)
+        WHERE si.purchase_cost = 0.00 AND si.selling_price > 0
+      `);
+
+      // Ensure batch_id index exists
+      try {
+        const [existingIdx] = await pool.query(
+          "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sale_items' AND INDEX_NAME = 'idx_sale_items_batch'"
+        );
+        if (existingIdx.length === 0) {
+          await pool.query("CREATE INDEX `idx_sale_items_batch` ON `sale_items` (batch_id)");
+        }
+      } catch (idxErr) {}
+    } catch (siErr) {
+      console.warn('[Schema Migration] sale_items columns check notice:', siErr.message);
+    }
+
+    // 4c. Ensure purchase_batches has supplier_id, purchase_id, selling_price
+    try {
+      const [pbCols] = await pool.query('DESCRIBE purchase_batches');
+      const pbColNames = pbCols.map(c => c.Field);
+      if (!pbColNames.includes('supplier_id')) {
+        await pool.query('ALTER TABLE purchase_batches ADD COLUMN supplier_id INT NULL AFTER selling_price');
+      }
+      if (!pbColNames.includes('purchase_id')) {
+        await pool.query('ALTER TABLE purchase_batches ADD COLUMN purchase_id INT NULL AFTER grn_id');
+      }
+      if (!pbColNames.includes('selling_price')) {
+        await pool.query('ALTER TABLE purchase_batches ADD COLUMN selling_price DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER mrp');
+      }
+    } catch (pbErr) {
+      console.warn('[Schema Migration] purchase_batches columns check notice:', pbErr.message);
+    }
+
+    // 4d. Ensure purchases table has supplier_invoice_no
+    try {
+      const [purCols] = await pool.query('DESCRIBE purchases');
+      const purColNames = purCols.map(c => c.Field);
+      if (!purColNames.includes('supplier_invoice_no')) {
+        await pool.query('ALTER TABLE purchases ADD COLUMN supplier_invoice_no VARCHAR(100) NULL AFTER purchase_no');
+      }
+    } catch (purErr) {
+      console.warn('[Schema Migration] purchases columns check notice:', purErr.message);
     }
 
     // 4a. Ensure customers table has notes, opening_balance, credit_limit, outstanding_balance, payment_mode, etc.

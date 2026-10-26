@@ -198,7 +198,10 @@ export const getSaleById = async (req, res, next) => {
         quantity: Number(i.quantity),
         sellingPrice: Number(i.selling_price),
         mrp: Number(i.mrp || i.master_mrp || 0),
+        batchId: i.batch_id,
         batchNumber: i.batch_number || 'DEFAULT',
+        purchaseCost: Number(i.purchase_cost || 0),
+        grossProfit: Number(i.gross_profit || 0),
         gst: Number(i.gst),
         total: Number(i.total),
         returnedQuantity: Number(i.returnedQuantity)
@@ -563,16 +566,25 @@ export const createSale = async (req, res, next) => {
 
     const updatedStockItems = [];
 
-    // Loop items: Save sale items + FIFO stock deduction with Batch-wise MRP
+    // Loop items: Save sale items + FIFO stock deduction with Batch-wise MRP & profit locking
     for (const item of items) {
       const pId = Number(item.productId || item.product_id);
       const qtyNeeded = Number(item.quantity);
-      let sPrice = Number(item.sellingPrice || item.selling_price || item.price || (item.quantity ? item.total / item.quantity : 0));
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [pId]);
+      
+      // Resolve latest effective selling price: explicit cart price, product master selling_price, or newest batch
+      let sPrice = Number(item.sellingPrice || item.selling_price || item.price || 0);
       if (isNaN(sPrice) || sPrice <= 0) {
-        const [[prod]] = await connection.query('SELECT selling_price, mrp FROM products WHERE id = ?', [pId]);
-        sPrice = Number(prod?.selling_price || prod?.mrp || 0);
+        sPrice = Number(prod?.selling_price || 0);
       }
-      const defaultMrp = Number(item.mrp || item.max_retail_price || 0);
+      if (sPrice <= 0) {
+        const [pbLatest] = await connection.query(
+          'SELECT selling_price FROM purchase_batches WHERE product_id = ? AND selling_price > 0 ORDER BY purchase_date DESC, id DESC LIMIT 1',
+          [pId]
+        );
+        sPrice = pbLatest.length > 0 ? Number(pbLatest[0].selling_price) : Number(prod?.mrp || 0);
+      }
+      const defaultMrp = Number(item.mrp || item.max_retail_price || prod?.mrp || 0);
 
       // Total stock before deduction
       const [[stockSumBefore]] = await connection.query(
@@ -627,30 +639,41 @@ export const createSale = async (req, res, next) => {
           );
 
           const batchMrp = Number(batchRow.mrp > 0 ? batchRow.mrp : defaultMrp);
+          const batchCost = Number(batchRow.purchase_price || 0) > 0 
+            ? Number(batchRow.purchase_price) 
+            : Number(prod?.purchase_price || 0);
+          const lineTotal = Number((batchDeductAmt * sPrice).toFixed(2));
+          const lineGrossProfit = Number(((sPrice - batchCost) * batchDeductAmt).toFixed(2));
 
           // Save sale_items record for this batch segment
           await connection.query(
-            `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_number, gst, total)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [saleId, pId, batchDeductAmt, sPrice, batchMrp, batchRow.batch_number, item.gst || 0, batchDeductAmt * sPrice]
+            `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_id, batch_number, purchase_cost, gross_profit, gst, total)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [saleId, pId, batchDeductAmt, sPrice, batchMrp, batchRow.id, batchRow.batch_number, batchCost, lineGrossProfit, item.gst || 0, lineTotal]
           );
 
           batchRemToDeduct -= batchDeductAmt;
         }
 
         if (batchRemToDeduct > 0) {
+          const overflowCost = Number(prod?.purchase_price || 0);
+          const overflowTotal = Number((batchRemToDeduct * sPrice).toFixed(2));
+          const overflowProfit = Number(((sPrice - overflowCost) * batchRemToDeduct).toFixed(2));
           await connection.query(
-            `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_number, gst, total)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [saleId, pId, batchRemToDeduct, sPrice, defaultMrp, 'BATCH-OVERFLOW', item.gst || 0, batchRemToDeduct * sPrice]
+            `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_id, batch_number, purchase_cost, gross_profit, gst, total)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [saleId, pId, batchRemToDeduct, sPrice, defaultMrp, null, 'BATCH-OVERFLOW', overflowCost, overflowProfit, item.gst || 0, overflowTotal]
           );
         }
       } else {
         // Fallback for items without active purchase_batches
+        const fallbackCost = Number(prod?.purchase_price || 0);
+        const fallbackTotal = Number((qtyNeeded * sPrice).toFixed(2));
+        const fallbackProfit = Number(((sPrice - fallbackCost) * qtyNeeded).toFixed(2));
         await connection.query(
-          `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_number, gst, total)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [saleId, pId, qtyNeeded, sPrice, defaultMrp, 'DEFAULT', item.gst || 0, item.total || (qtyNeeded * sPrice)]
+          `INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, mrp, batch_id, batch_number, purchase_cost, gross_profit, gst, total)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [saleId, pId, qtyNeeded, sPrice, defaultMrp, null, 'DEFAULT', fallbackCost, fallbackProfit, item.gst || 0, fallbackTotal]
         );
       }
 
@@ -826,8 +849,8 @@ export const deleteSale = async (req, res, next) => {
 
     const { invoice_no, warehouse_id, customer_id } = sales[0];
 
-    // Fetch item lines
-    const [items] = await connection.query('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?', [id]);
+    // Fetch item lines including batch allocation
+    const [items] = await connection.query('SELECT product_id, quantity, batch_id, batch_number FROM sale_items WHERE sale_id = ?', [id]);
 
     // Restore stock for each item
     for (const item of items) {
@@ -857,18 +880,57 @@ export const deleteSale = async (req, res, next) => {
         );
       }
 
-      // Restore batch record in purchase_batches
-      await connection.query(
-        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, warehouse_id)
-         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?)`,
-        [pId, `VOID-RESTORE-${Date.now()}`, qty, qty, warehouse_id]
-      );
+      // Restore remaining quantity directly into allocated purchase batch if present
+      let batchRestored = false;
+      if (item.batch_id) {
+        const [pbCheck] = await connection.query('SELECT id FROM purchase_batches WHERE id = ?', [item.batch_id]);
+        if (pbCheck.length > 0) {
+          await connection.query(
+            'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+            [qty, item.batch_id]
+          );
+          batchRestored = true;
+        }
+      }
+      if (!batchRestored && item.batch_number && item.batch_number !== 'DEFAULT' && item.batch_number !== 'BATCH-OVERFLOW') {
+        const [pbCheckNo] = await connection.query(
+          'SELECT id FROM purchase_batches WHERE product_id = ? AND batch_number = ? LIMIT 1',
+          [pId, item.batch_number]
+        );
+        if (pbCheckNo.length > 0) {
+          await connection.query(
+            'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+            [qty, pbCheckNo[0].id]
+          );
+          batchRestored = true;
+        }
+      }
+      if (!batchRestored) {
+        const [pbLatest] = await connection.query(
+          'SELECT id FROM purchase_batches WHERE product_id = ? ORDER BY purchase_date DESC, id DESC LIMIT 1',
+          [pId]
+        );
+        if (pbLatest.length > 0) {
+          await connection.query(
+            'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+            [qty, pbLatest[0].id]
+          );
+        } else {
+          await connection.query(
+            `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, warehouse_id)
+             VALUES (?, ?, ?, ?, CURRENT_DATE(), ?)`,
+            [pId, `VOID-RESTORE-${Date.now()}`, qty, qty, warehouse_id]
+          );
+        }
+      }
 
       await connection.query(
         `INSERT INTO stock_logs (product_id, warehouse_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
          VALUES (?, ?, 'Stock In', ?, ?, 'Sales Transaction Voided/Returned', ?, ?, ?)`,
         [pId, warehouse_id, qty, invoice_no, validUserId, prevQty, prevQty + qty]
       );
+
+      await syncProductFifoState(connection, pId);
     }
 
     // Delete linked credit transactions

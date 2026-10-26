@@ -91,14 +91,21 @@ export const syncProductFifoState = async (connection, productId) => {
         updateFields.push('purchase_price = ?');
         queryParams.push(newPurchasePrice);
       }
-      if (newMrp > 0) {
-        updateFields.push('mrp = ?');
-        queryParams.push(newMrp);
+      // Preserve latest effective selling price on product master (FIFO does not downgrade retail selling price)
+      const [[currentProd]] = await connection.query('SELECT selling_price FROM products WHERE id = ?', [productId]);
+      if (!currentProd || !currentProd.selling_price || Number(currentProd.selling_price) <= 0) {
+        const [latestBatch] = await connection.query(
+          `SELECT selling_price FROM purchase_batches 
+           WHERE product_id = ? AND selling_price > 0 
+           ORDER BY purchase_date DESC, id DESC LIMIT 1`,
+          [productId]
+        );
+        if (latestBatch.length > 0 && Number(latestBatch[0].selling_price) > 0) {
+          updateFields.push('selling_price = ?');
+          queryParams.push(Number(latestBatch[0].selling_price));
+        }
       }
-      if (newSellingPrice > 0) {
-        updateFields.push('selling_price = ?');
-        queryParams.push(newSellingPrice);
-      }
+
       if (newExpiry && newExpiry !== '0000-00-00' && newExpiry !== 'N/A') {
         updateFields.push('expiry_date = ?');
         queryParams.push(newExpiry);

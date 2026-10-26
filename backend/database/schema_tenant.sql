@@ -396,11 +396,16 @@ CREATE TABLE IF NOT EXISTS sale_items (
   quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000,
   selling_price DECIMAL(12,2) NOT NULL,
   mrp DECIMAL(12,2) NULL,
+  batch_id INT NULL,
   batch_number VARCHAR(100) NULL,
+  purchase_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  gross_profit DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   gst DECIMAL(5,2) DEFAULT 0.00,
   total DECIMAL(12,2) NOT NULL,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-  FOREIGN KEY (product_id) REFERENCES products(id)
+  FOREIGN KEY (product_id) REFERENCES products(id),
+  FOREIGN KEY (batch_id) REFERENCES purchase_batches(id) ON DELETE SET NULL,
+  INDEX idx_sale_items_batch (batch_id)
 );
 
 -- 16b. Sale Payments Table (Split Payments / Multiple Modes)

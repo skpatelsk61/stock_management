@@ -23,13 +23,19 @@ import { useAppSelector } from '../../store/hooks';
 import { reportsAPI, salesAPI, customersAPI, borrowAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
 
+let cachedSMState = null;
+try {
+  const stored = sessionStorage.getItem('cached_sm_state');
+  if (stored) cachedSMState = JSON.parse(stored);
+} catch (e) {}
+
 const SalesManagerDashboard = () => {
   const { user } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedSMState);
   const [refreshing, setRefreshing] = useState(false);
-  const [kpis, setKpis] = useState({
+  const [kpis, setKpis] = useState(cachedSMState?.kpis || {
     totalSales: 0,
     totalOrders: 0,
     totalCustomers: 0,
@@ -37,50 +43,31 @@ const SalesManagerDashboard = () => {
     dailyRevenue: 0
   });
 
-  const [recentSales, setRecentSales] = useState([]);
-  const [salesTrend, setSalesTrend] = useState([]);
+  const [recentSales, setRecentSales] = useState(cachedSMState?.recentSales || []);
+  const [salesTrend, setSalesTrend] = useState(cachedSMState?.salesTrend || []);
 
   const loadSalesData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (!cachedSMState) setLoading(true);
 
     try {
       const [kpiRes, salesRes, customerRes, borrowRes, chartRes] = await Promise.all([
-        reportsAPI.getKPIs().catch(() => null),
-        salesAPI.getAll().catch(() => null),
+        reportsAPI.getKPIs(isRefresh ? { refresh: true } : {}).catch(() => null),
+        salesAPI.getAll({ limit: 5 }).catch(() => null),
         customersAPI.getAll().catch(() => null),
         borrowAPI.getSummary().catch(() => null),
-        reportsAPI.getCharts().catch(() => null)
+        reportsAPI.getCharts(isRefresh ? { refresh: true } : {}).catch(() => null)
       ]);
 
-      if (kpiRes?.success && kpiRes.kpis) {
-        setKpis(prev => ({
-          ...prev,
-          totalSales: kpiRes.kpis.totalSales || prev.totalSales,
-          totalOrders: kpiRes.kpis.totalOrders || prev.totalOrders,
-          totalCustomers: kpiRes.kpis.totalCustomers || prev.totalCustomers
-        }));
-      }
-
+      let salesList = [];
       if (salesRes?.success && salesRes.sales) {
-        setRecentSales(salesRes.sales.slice(0, 5));
-        setKpis(prev => ({
-          ...prev,
-          totalOrders: salesRes.sales.length
-        }));
+        salesList = salesRes.sales.slice(0, 5);
+        setRecentSales(salesList);
       }
 
-      if (customerRes?.success && customerRes.customers) {
-        setKpis(prev => ({ ...prev, totalCustomers: customerRes.customers.length }));
-      }
-
-      if (borrowRes?.success) {
-        const udharTotal = borrowRes.summaryTotals?.total_pending || (borrowRes.summary || []).reduce((acc, curr) => acc + Number(curr.balance || 0), 0);
-        setKpis(prev => ({ ...prev, totalUdharOutstanding: Number(udharTotal || 0) }));
-      }
-
+      let trends = [];
       if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
-        const trends = chartRes.charts.monthlyTrends.map(t => ({
+        trends = chartRes.charts.monthlyTrends.map(t => ({
           day: t.name,
           Sales: t.Sales || 0,
           Udhar: t.Udhar || 0
@@ -89,6 +76,30 @@ const SalesManagerDashboard = () => {
       } else {
         setSalesTrend([]);
       }
+
+      const udharTotal = borrowRes?.success ? (borrowRes.summaryTotals?.total_pending || (borrowRes.summary || []).reduce((acc, curr) => acc + Number(curr.balance || 0), 0)) : 0;
+
+      setKpis(prev => {
+        const nextKpis = {
+          ...prev,
+          totalSales: kpiRes?.kpis?.totalSales ?? prev.totalSales,
+          totalOrders: kpiRes?.kpis?.totalOrders ?? (salesRes?.sales?.length || prev.totalOrders),
+          totalCustomers: customerRes?.customers ? customerRes.customers.length : (kpiRes?.kpis?.totalCustomers ?? prev.totalCustomers),
+          totalUdharOutstanding: Number(udharTotal || prev.totalUdharOutstanding || 0)
+        };
+
+        const newState = {
+          kpis: nextKpis,
+          recentSales: salesList,
+          salesTrend: trends
+        };
+        cachedSMState = newState;
+        try {
+          sessionStorage.setItem('cached_sm_state', JSON.stringify(newState));
+        } catch (e) {}
+
+        return nextKpis;
+      });
     } catch (err) {
       console.error('Sales Dashboard fetch error:', err);
     } finally {

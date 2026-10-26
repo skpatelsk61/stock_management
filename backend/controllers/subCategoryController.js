@@ -158,13 +158,18 @@ export const updateSubCategory = async (req, res, next) => {
       ]
     );
 
-    // Sync products table category_id for products belonging to this sub_category_id
+    // 1. Sync brands table category_id for all brands belonging to this sub_category_id
     if (targetCatId) {
-      await req.db.query('UPDATE products SET category_id = ? WHERE sub_category_id = ?', [targetCatId, id]);
+      await req.db.query('UPDATE brands SET category_id = ? WHERE sub_category_id = ?', [targetCatId, id]);
+    }
+
+    // 2. Sync products table category_id and sub_category name for products belonging to this sub_category_id
+    if (targetCatId) {
+      await req.db.query('UPDATE products SET category_id = ?, sub_category = ? WHERE sub_category_id = ?', [targetCatId, targetName, id]);
     }
 
     await logActivity(req.user.id, 'Update Sub Category', 'Categories',
-      `Updated Sub Category ID: ${id} to "${targetName}"`, req.ip);
+      `Updated Sub Category ID: ${id} to "${targetName}" (Category ID: ${targetCatId})`, req.ip);
 
     return res.status(200).json({
       success: true,

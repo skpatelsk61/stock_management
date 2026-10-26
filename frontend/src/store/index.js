@@ -42,5 +42,10 @@ export const store = configureStore({
     billing: billingReducer,
     monitoring: monitoringReducer,
     permissions: permissionReducer,
-  }
+  },
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: false,
+      immutableCheck: false,
+    }),
 });
