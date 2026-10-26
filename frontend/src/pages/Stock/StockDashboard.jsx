@@ -29,6 +29,12 @@ import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { fetchStockSummary, fetchStockAlerts } from '../../store/slices/stockSlice';
 import { fetchProducts } from '../../store/slices/productSlice';
 
+let cachedStockState = null;
+try {
+  const stored = sessionStorage.getItem('cached_stock_state');
+  if (stored) cachedStockState = JSON.parse(stored);
+} catch (e) {}
+
 const StockDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -38,8 +44,8 @@ const StockDashboard = () => {
   const { stockSummary: reduxStockSummary } = useAppSelector((s) => s.stock);
 
   // Local mapped state derived from Redux data
-  const [stockSummary, setStockSummary] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [stockSummary, setStockSummary] = useState(cachedStockState?.stockSummary || []);
+  const [loading, setLoading] = useState(!cachedStockState);
   const [dbOffline, setDbOffline] = useState(false);
 
   // Filters state (for Current Stock tab)
@@ -190,8 +196,8 @@ const StockDashboard = () => {
     }
   };
 
-  const fetchStockData = async () => {
-    setLoading(true);
+  const fetchStockData = async (forceSpinner = false) => {
+    if (!cachedStockState || forceSpinner) setLoading(true);
     try {
       const summaryRes = await stockAPI.getSummary();
       if (summaryRes.success) {

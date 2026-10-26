@@ -439,6 +439,10 @@ export const purchaseOrdersAPI = {
     const response = await API.put(`/purchases/orders/${id}/status`, data);
     return response.data;
   },
+  finalizeWithAdvance: async (id, data) => {
+    const response = await API.post(`/purchases/orders/${id}/finalize-with-advance`, data);
+    return response.data;
+  },
   delete: async (id) => {
     const response = await API.delete(`/purchases/orders/${id}`);
     return response.data;

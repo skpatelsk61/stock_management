@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { 
+  CurrencyRupeeIcon,
+  BanknotesIcon,
   BuildingStorefrontIcon, 
   XMarkIcon,
   ArrowPathIcon,
@@ -121,6 +123,8 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
   const [customWeights, setCustomWeights] = useState(() => getStoredCustomWeights('Packet'));
   const [isWeightDropdownOpen, setIsWeightDropdownOpen] = useState(false);
   const [customWeightInput, setCustomWeightInput] = useState('');
+  const [variantPrices, setVariantPrices] = useState({});
+  const pricingSectionRef = useRef(null);
   const weightDropdownRef = useRef(null);
   const [errors, setErrors] = useState({});
   const [dbCategories, setDbCategories] = useState(() => cachedProductMasters?.categories || (categories.length ? categories : []));
@@ -287,6 +291,27 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       setSelectedWeights(allExistingWeights);
       setCustomWeights(getStoredCustomWeights(product.unit || 'Packet'));
       setCustomWeightInput('');
+
+      const initialVariantPrices = {};
+      if (product.existingVariants && product.existingVariants.length > 0) {
+        product.existingVariants.forEach(v => {
+          initialVariantPrices[v.id] = {
+            sellingPrice: v.sellingPrice ?? v.selling_price ?? '',
+            mrp: v.mrp ?? v.max_retail_price ?? '',
+            purchasePrice: v.purchasePrice ?? v.purchase_price ?? '',
+            gst: v.gst !== undefined && v.gst !== null ? String(v.gst) : '0',
+          };
+        });
+      }
+      setVariantPrices(initialVariantPrices);
+
+      if (product.focusPricing) {
+        setTimeout(() => {
+          if (pricingSectionRef.current) {
+            pricingSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+      }
 
       if (subName && !subMatch && dbSubCategories.length > 0) {
         setIsCustomSubCategory(true);
@@ -493,7 +518,8 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
       openingStock: formData.openingStock || '0',
       measurement_value: selectedWeights[0] || formData.measurement_value || '',
       weights: selectedWeights,
-      existingVariants: product?.existingVariants || []
+      existingVariants: product?.existingVariants || [],
+      variantPrices: variantPrices
     });
   };
 
@@ -854,6 +880,253 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
             </div>
           </div>
 
+
+          {/* CARD 3: PRICING & TAX RATES (Full Width - Visible ONLY when editing details) */}
+          {Boolean(product) && (
+          <div 
+            ref={pricingSectionRef}
+            id="pricing-section"
+            className={`md:col-span-2 bg-white dark:bg-slate-900 border p-5 rounded-2xl shadow-sm space-y-4 transition-all ${
+              product?.focusPricing ? 'border-amber-400 ring-2 ring-amber-400/20 bg-amber-50/10' : 'border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <span className="text-base">💰</span> Price &amp; Tax Configuration / Rates Management
+              </h3>
+              {product && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="font-semibold text-slate-500">Active Variant:</span>
+                  <span className="font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                    ⚖️ {product.measurement_value || product.unit || 'Standard'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Rates Input Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {/* 1. New Selling Price */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  Selling Price / बिक्री दर (₹) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="sellingPrice"
+                    value={formData.sellingPrice}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-xs border border-emerald-300 dark:border-emerald-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 font-mono font-bold text-emerald-800 dark:text-emerald-200 placeholder-slate-400 outline-none"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1">Store customer price (POS selling rate)</p>
+              </div>
+
+              {/* 2. MRP */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  MRP / अधिकतम खुदरा मूल्य (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="mrp"
+                    value={formData.mrp}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-mono font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1">Printed package MRP</p>
+              </div>
+
+              {/* 3. Purchase Cost */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  Purchase Price / खरीद लागत (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="purchasePrice"
+                    value={formData.purchasePrice}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-mono font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1">Base wholesale purchase cost</p>
+              </div>
+
+              {/* 4. GST */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  GST Rate (%)
+                </label>
+                <select
+                  name="gst"
+                  value={formData.gst}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none cursor-pointer"
+                >
+                  <option value="0">0% (Exempted)</option>
+                  <option value="5">5% (Essential)</option>
+                  <option value="12">12% (Standard 1)</option>
+                  <option value="18">18% (Standard 2)</option>
+                  <option value="28">28% (Luxury)</option>
+                </select>
+                <p className="text-[9px] text-slate-400 mt-1">Applicable GST tax bracket</p>
+              </div>
+            </div>
+
+            {/* Live Metrics: Discount & Margin calculations */}
+            {(Number(formData.sellingPrice) > 0 || Number(formData.mrp) > 0 || Number(formData.purchasePrice) > 0) && (
+              <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80 text-xs">
+                {Number(formData.mrp) > Number(formData.sellingPrice) && Number(formData.sellingPrice) > 0 && (
+                  <span className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                    <span>🏷️ Discount:</span>
+                    <span>₹{(Number(formData.mrp) - Number(formData.sellingPrice)).toFixed(2)} ({(((Number(formData.mrp) - Number(formData.sellingPrice)) / Number(formData.mrp)) * 100).toFixed(1)}% OFF)</span>
+                  </span>
+                )}
+
+                {Number(formData.sellingPrice) > Number(formData.purchasePrice) && Number(formData.purchasePrice) > 0 && (
+                  <span className="flex items-center gap-1.5 font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                    <span>📈 Gross Margin:</span>
+                    <span>₹{(Number(formData.sellingPrice) - Number(formData.purchasePrice)).toFixed(2)} ({(((Number(formData.sellingPrice) - Number(formData.purchasePrice)) / Number(formData.sellingPrice)) * 100).toFixed(1)}%)</span>
+                  </span>
+                )}
+
+                {Number(formData.sellingPrice) > 0 && Number(formData.purchasePrice) > Number(formData.sellingPrice) && (
+                  <span className="flex items-center gap-1.5 font-bold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                    <span>⚠️ Warning: Selling price is lower than purchase cost!</span>
+                  </span>
+                )}
+
+                {Number(formData.mrp) > 0 && Number(formData.sellingPrice) > Number(formData.mrp) && (
+                  <span className="flex items-center gap-1.5 font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                    <span>⚠️ Note: Selling price exceeds printed MRP.</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Multi-variant prices table if more than 1 variant exists */}
+            {product?.existingVariants && product.existingVariants.length > 1 && (
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                    All Pack Size Variants Pricing
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    Set specific prices for each pack size below:
+                  </span>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="py-2 px-3">Variant Weight/Size</th>
+                        <th className="py-2 px-3">Barcode</th>
+                        <th className="py-2 px-3">Purchase Price (₹)</th>
+                        <th className="py-2 px-3">MRP (₹)</th>
+                        <th className="py-2 px-3">Selling Price (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-semibold">
+                      {product.existingVariants.map((v) => {
+                        const isSelected = v.id === product.id;
+                        const vPrice = variantPrices[v.id] || {
+                          sellingPrice: v.sellingPrice ?? v.selling_price ?? '',
+                          mrp: v.mrp ?? '',
+                          purchasePrice: v.purchasePrice ?? v.purchase_price ?? ''
+                        };
+                        return (
+                          <tr key={v.id} className={isSelected ? 'bg-amber-50/50 dark:bg-amber-950/20 font-bold' : ''}>
+                            <td className="py-2 px-3">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                ⚖️ {v.measurement_value || v.unit}
+                              </span>
+                              {isSelected && <span className="ml-2 text-[10px] text-amber-600 font-bold">(Active)</span>}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-[10px] text-slate-400">{v.barcode || '—'}</td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={isSelected ? formData.purchasePrice : vPrice.purchasePrice}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (isSelected) {
+                                    setFormData(prev => ({ ...prev, purchasePrice: val }));
+                                  }
+                                  setVariantPrices(prev => ({
+                                    ...prev,
+                                    [v.id]: { ...(prev[v.id] || vPrice), purchasePrice: val }
+                                  }));
+                                }}
+                                placeholder="0.00"
+                                className="w-24 px-2 py-1 text-xs border rounded-lg bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 font-mono"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={isSelected ? formData.mrp : vPrice.mrp}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (isSelected) {
+                                    setFormData(prev => ({ ...prev, mrp: val }));
+                                  }
+                                  setVariantPrices(prev => ({
+                                    ...prev,
+                                    [v.id]: { ...(prev[v.id] || vPrice), mrp: val }
+                                  }));
+                                }}
+                                placeholder="0.00"
+                                className="w-24 px-2 py-1 text-xs border rounded-lg bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 font-mono"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={isSelected ? formData.sellingPrice : vPrice.sellingPrice}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (isSelected) {
+                                    setFormData(prev => ({ ...prev, sellingPrice: val }));
+                                  }
+                                  setVariantPrices(prev => ({
+                                    ...prev,
+                                    [v.id]: { ...(prev[v.id] || vPrice), sellingPrice: val }
+                                  }));
+                                }}
+                                placeholder="0.00"
+                                className="w-24 px-2 py-1 text-xs border rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700 font-mono font-bold text-emerald-700 dark:text-emerald-300"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
           {/* CARD 4: INVENTORY DETAILS (Full Width) */}
           <div className="md:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm space-y-4">

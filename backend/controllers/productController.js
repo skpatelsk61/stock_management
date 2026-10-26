@@ -534,6 +534,20 @@ export const updateProduct = async (req, res, next) => {
       ]
     );
 
+    // Sync selling price and mrp to active purchase batches for this product if updated
+    if (sellingPriceVal !== undefined && sellingPriceVal !== null && !isNaN(Number(sellingPriceVal))) {
+      try {
+        await req.db.query(
+          `UPDATE purchase_batches 
+           SET selling_price = ?, mrp = COALESCE(?, mrp)
+           WHERE product_id = ? AND remaining_quantity > 0`,
+          [sellingPriceVal, mrpVal, id]
+        );
+      } catch (batchSyncErr) {
+        // Safe fallback if purchase_batches doesn't have these columns
+      }
+    }
+
     await logActivity(req.user.id, 'Update Product', 'Products', `Updated product details for "${name || existing[0].name}" (ID: ${id})`, req.ip);
 
     return res.status(200).json({ success: true, message: 'Product updated successfully' });

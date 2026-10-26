@@ -6,32 +6,32 @@ import PermissionRoute from './components/common/PermissionRoute';
 import MainLayout from './components/layout/MainLayout';
 import TopProgressBar from './components/common/TopProgressBar';
 
-// Lazy Loaded Pages for Instant Initial Loading & Code Splitting
-const Landing = lazy(() => import('./pages/Landing/Landing'));
-const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
-const ProductList = lazy(() => import('./pages/Products/ProductList'));
-const CategoryList = lazy(() => import('./pages/Categories/CategoryList'));
-const SalesList = lazy(() => import('./pages/Sales/SalesList'));
-const SalesDashboard = lazy(() => import('./pages/Sales/SalesDashboard'));
-const SalesReturn = lazy(() => import('./pages/Sales/SalesReturn'));
-const StockDashboard = lazy(() => import('./pages/Stock/StockDashboard'));
-const VendorReturnManagement = lazy(() => import('./pages/Stock/VendorReturnManagement'));
-const BorrowLedger = lazy(() => import('./pages/Borrow/BorrowLedger'));
-const Reports = lazy(() => import('./pages/Reports/Reports'));
-const SuperAdminDashboard = lazy(() => import('./pages/SuperAdmin/SuperAdminDashboard'));
-const Billing = lazy(() => import('./pages/Billing/Billing'));
-const StoreManagement = lazy(() => import('./pages/SuperAdmin/StoreManagement'));
-const StaffList = lazy(() => import('./pages/Users/StaffList'));
-const NotificationHistory = lazy(() => import('./pages/Notifications/NotificationHistory'));
-const VendorList = lazy(() => import('./pages/Vendors/VendorList'));
-const CustomerList = lazy(() => import('./pages/Customers/CustomerList'));
-const ActivityLogs = lazy(() => import('./pages/Settings/ActivityLogs'));
+// Direct imports for core ERP modules for instantaneous navigation (0ms chunk delay)
+import Dashboard from './pages/Dashboard/Dashboard';
+import ProductList from './pages/Products/ProductList';
+import CategoryList from './pages/Categories/CategoryList';
+import SalesList from './pages/Sales/SalesList';
+import SalesDashboard from './pages/Sales/SalesDashboard';
+import SalesReturn from './pages/Sales/SalesReturn';
+import StockDashboard from './pages/Stock/StockDashboard';
+import VendorReturnManagement from './pages/Stock/VendorReturnManagement';
+import BorrowLedger from './pages/Borrow/BorrowLedger';
+import Reports from './pages/Reports/Reports';
+import Billing from './pages/Billing/Billing';
+import StaffList from './pages/Users/StaffList';
+import NotificationHistory from './pages/Notifications/NotificationHistory';
+import VendorList from './pages/Vendors/VendorList';
+import CustomerList from './pages/Customers/CustomerList';
+import ActivityLogs from './pages/Settings/ActivityLogs';
 
-// Auth Pages
+// Isolated Auth & SuperAdmin Pages (rarely accessed, kept lazy)
+const Landing = lazy(() => import('./pages/Landing/Landing'));
 const Login = lazy(() => import('./pages/Auth/Login'));
 const Register = lazy(() => import('./pages/Auth/Register'));
 const ForgotPassword = lazy(() => import('./pages/Auth/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/Auth/ResetPassword'));
+const SuperAdminDashboard = lazy(() => import('./pages/SuperAdmin/SuperAdminDashboard'));
+const StoreManagement = lazy(() => import('./pages/SuperAdmin/StoreManagement'));
 
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { hideToast } from './store/slices/notificationSlice';

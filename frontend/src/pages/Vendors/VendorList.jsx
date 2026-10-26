@@ -35,6 +35,12 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 import VendorReturnManagement from '../Stock/VendorReturnManagement';
 
+let cachedVendorState = null;
+try {
+  const stored = sessionStorage.getItem('cached_vendor_state');
+  if (stored) cachedVendorState = JSON.parse(stored);
+} catch (e) {}
+
 const VendorList = ({ defaultView = 'list' }) => {
   const dispatch = useAppDispatch();
   const [searchParams] = useSearchParams();
@@ -44,8 +50,8 @@ const VendorList = ({ defaultView = 'list' }) => {
   // Strict read-only for Viewer role, Super Admin role, or Super Admin Monitoring Mode
   const isReadOnly = user?.role === 'Viewer' || user?.role === 'Super Admin' || !!localStorage.getItem('monitoredTenant');
 
-  const [vendors, setVendors] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [vendors, setVendors] = useState(cachedVendorState?.vendors || []);
+  const [loading, setLoading] = useState(!cachedVendorState);
   const [showModal, setShowModal] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -108,12 +114,16 @@ const VendorList = ({ defaultView = 'list' }) => {
   const [vendorReturnsList, setVendorReturnsList] = useState([]);
   const [invoiceItemsLoading, setInvoiceItemsLoading] = useState(false);
 
-  const fetchVendors = async () => {
-    setLoading(true);
+  const fetchVendors = async (forceSpinner = false) => {
+    if (!cachedVendorState || forceSpinner) setLoading(true);
     try {
       const data = await vendorsAPI.getAll();
       if (data.success) {
         setVendors(data.vendors);
+        cachedVendorState = { vendors: data.vendors };
+        try {
+          sessionStorage.setItem('cached_vendor_state', JSON.stringify(cachedVendorState));
+        } catch (e) {}
       }
       setDbOffline(false);
     } catch (err) {
@@ -396,10 +406,10 @@ const VendorList = ({ defaultView = 'list' }) => {
     setPaymentVendor(targetVendor);
     setPaymentInvoices([]);
 
-    const hasAdvance = Number(targetVendor?.advance_balance || 0) > 0;
-    const defaultAmount = hasAdvance
-      ? String(targetVendor.advance_balance)
-      : String(targetVendor?.outstanding_balance || '');
+    const dueAmount = Number(targetVendor?.outstanding_balance || 0);
+    // If vendor has outstanding balance, prefill it for 1-click full payment settlement
+    // If vendor has 0 due, leave empty so user can freely enter any Advance Jama payment
+    const defaultAmount = dueAmount > 0 ? String(dueAmount) : '';
 
     setPaymentForm({
       purchase_id: purchaseId,
@@ -441,10 +451,10 @@ const VendorList = ({ defaultView = 'list' }) => {
         return;
       }
     }
-    const targetVal = Number(paymentVendor?.advance_balance || 0) > 0 
-      ? paymentVendor.advance_balance 
-      : paymentVendor?.outstanding_balance || 0;
-    setPaymentForm(prev => ({ ...prev, amount: String(targetVal) }));
+    const dueVal = Number(paymentVendor?.outstanding_balance || 0);
+    if (dueVal > 0) {
+      setPaymentForm(prev => ({ ...prev, amount: String(dueVal) }));
+    }
   };
 
   const handleSavePayment = async (e) => {
@@ -968,14 +978,10 @@ const VendorList = ({ defaultView = 'list' }) => {
                                 <>
                                   <button
                                     onClick={() => handleOpenRecordPayment(vendor)}
-                                    title={advance > 0 ? "Receive Cash Refund from Supplier to Settle Advance Balance" : "Record Manual Supplier Payment"}
-                                    className={`px-3.5 py-1.5 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs ${
-                                      advance > 0
-                                        ? 'bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white font-black'
-                                        : 'bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold'
-                                    }`}
+                                    title="Record Supplier Payment / Add Advance Jama"
+                                    className="px-3.5 py-1.5 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold"
                                   >
-                                    {advance > 0 ? 'Receive Refund 📥' : 'Record Pay 📤'}
+                                    Record Pay 📤
                                   </button>
                                   <button
                                     onClick={() => handleOpenPurchaseReturnModal(vendor)}
@@ -1758,14 +1764,21 @@ const VendorList = ({ defaultView = 'list' }) => {
                       <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                         Payment Amount (₹) <span className="text-rose-500">*</span>
                       </label>
-                      <button
-                        type="button"
-                        onClick={handleFillFullBalance}
-                        className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all cursor-pointer flex items-center gap-1"
-                      >
-                        <span>⚡</span>
-                        <span>Full Due (₹{Math.abs(Number(paymentVendor?.outstanding_balance || 0) - Number(paymentVendor?.advance_balance || 0)).toLocaleString('en-IN')})</span>
-                      </button>
+                      {Number(paymentVendor?.outstanding_balance || 0) > 0 ? (
+                        <button
+                          type="button"
+                          onClick={handleFillFullBalance}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <span>⚡</span>
+                          <span>Full Due (₹{Number(paymentVendor?.outstanding_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})</span>
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 flex items-center gap-1">
+                          <span>✨</span>
+                          <span>All Dues Paid — Will deposit as Advance Jama</span>
+                        </span>
+                      )}
                     </div>
 
                     <div className="relative flex items-center">

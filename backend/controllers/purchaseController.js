@@ -1121,6 +1121,8 @@ export const getPurchaseById = async (req, res, next) => {
              pr.barcode,
              pr.sku,
              pr.hsn_code,
+             pr.measurement_value,
+             COALESCE(b.name, pr.brand) as brand,
              COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id AND status != 'Void'), 0) as returnedQuantity,
              COALESCE((SELECT SUM(quantity) FROM stock WHERE product_id = pi.product_id), 0) as current_stock,
              COALESCE(
@@ -1130,6 +1132,7 @@ export const getPurchaseById = async (req, res, next) => {
              ) as batch_number
       FROM purchase_items pi
       JOIN products pr ON pi.product_id = pr.id
+      LEFT JOIN brands b ON pr.brand_id = b.id
       WHERE pi.purchase_id = ?
     `, [purchase.grn_id || 0, id]);
 
@@ -1418,11 +1421,15 @@ export const createPurchase = async (req, res, next) => {
 
     const invoiceSubtotal = Number(subtotal || itemsTotal);
     const invoiceTotal = Number(total || (invoiceSubtotal - Number(discount || 0) + Number(gst_amount || 0)));
+    const credit_damaged_advance = Boolean(req.body.credit_damaged_advance);
+    const damaged_advance_amount = Number(req.body.damaged_advance_amount || 0);
+    const total_damaged_units = Number(req.body.total_damaged_units || 0);
+
     let actualPaymentStatus = payment_status || 'Pending';
     let initialPaid = Number(req.body.paid_amount || 0);
 
     if (actualPaymentStatus === 'Paid' && initialPaid === 0) {
-      initialPaid = invoiceTotal;
+      initialPaid = invoiceTotal + (credit_damaged_advance ? damaged_advance_amount : 0);
     } else if (actualPaymentStatus === 'Partial' && initialPaid === 0) {
       initialPaid = invoiceTotal / 2;
     }
@@ -1436,13 +1443,15 @@ export const createPurchase = async (req, res, next) => {
       initialPaid = 0;
     }
 
+    const actualInvoicePaid = Math.min(invoiceTotal, initialPaid);
+
     // Insert Purchase
     const [result] = await connection.query(
       `INSERT INTO purchases (purchase_no, vendor_id, warehouse_id, date, subtotal, discount, gst_amount, total, paid_amount, payment_status, delivery_status, payment_method, purchase_order_id, grn_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         purchaseNo, vendor_id, warehouse_id, date, 
-        invoiceSubtotal, discount || 0, gst_amount || 0, invoiceTotal, initialPaid,
+        invoiceSubtotal, discount || 0, gst_amount || 0, invoiceTotal, actualInvoicePaid,
         actualPaymentStatus, delivery_status || 'Received', payment_method || 'Cash',
         purchase_order_id || null, grn_id || null
       ]
@@ -1651,7 +1660,13 @@ export const createPurchase = async (req, res, next) => {
       [invoiceTotal, actualFreshPaid, vendor_id]
     );
 
-    if (actualFreshPaid > 0) {
+    let paymentId = null;
+    let initialPayNo = null;
+    const effectivePayment = actualFreshPaid > 0 
+      ? actualFreshPaid 
+      : (credit_damaged_advance && damaged_advance_amount > 0 ? damaged_advance_amount : 0);
+
+    if (effectivePayment > 0) {
       const year = new Date(date).getFullYear();
       const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`VPAY-%-${year}`]);
       let maxSeq = 0;
@@ -1664,9 +1679,20 @@ export const createPurchase = async (req, res, next) => {
           }
         }
       }
-      const initialPayNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+      initialPayNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
 
-      await connection.query(
+      const payRemarks = (credit_damaged_advance && damaged_advance_amount > 0)
+        ? (actualFreshPaid > 0
+            ? `Payment for ${purchaseNo} (includes ₹${damaged_advance_amount.toFixed(2)} Advance Jama for ${total_damaged_units} damaged items on PO ${purchase_order_id ? `#PO-${purchase_order_id}` : purchaseNo})`
+            : `Advance Jama for ${total_damaged_units} damaged items on PO ${purchase_order_id ? `#PO-${purchase_order_id}` : purchaseNo}`)
+        : `Initial Payment for ${purchaseNo}`;
+
+      const validPaymentModes = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'NEFT/RTGS', 'Other'];
+      const resolvedPaymentMode = (payment_method && validPaymentModes.includes(payment_method))
+        ? payment_method
+        : (payment_method === 'Credit' ? 'Other' : 'Cash');
+
+      const [payResult] = await connection.query(
         `INSERT INTO supplier_payments 
           (payment_no, vendor_id, purchase_id, payment_date, amount, payment_mode, reference_no, remarks, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1675,13 +1701,14 @@ export const createPurchase = async (req, res, next) => {
           vendor_id,
           purchaseId,
           date || new Date(),
-          actualFreshPaid,
-          payment_method || 'Cash',
+          effectivePayment,
+          resolvedPaymentMode,
           `INIT-${purchaseNo}`,
-          `Initial Payment for ${purchaseNo}`,
+          payRemarks,
           req.user ? req.user.id : 1
         ]
       );
+      paymentId = payResult.insertId;
     }
 
     // Fetch updated vendor totals & calculate outstanding balance (Single Source of Truth considering returns & advance credit)
@@ -1699,10 +1726,11 @@ export const createPurchase = async (req, res, next) => {
       
       const diff = (netP + openBal) - totPaid;
       const newBal = Math.max(0, diff);
+      const newAdv = diff < 0 ? Number(Math.abs(diff).toFixed(2)) : 0;
 
       await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-        [grossP, totPaid, newBal, vendor_id]
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, newAdv, vendor_id]
       );
 
       // Save Purchase Invoice entry in vendor_ledger
@@ -1720,6 +1748,29 @@ export const createPurchase = async (req, res, next) => {
           newBal
         ]
       );
+
+      // If payment was recorded, save payment entry in vendor_ledger
+      if (effectivePayment > 0) {
+        await connection.query(
+          `INSERT INTO vendor_ledger 
+            (vendor_id, purchase_id, payment_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+           VALUES (?, ?, ?, ?, 'SUPPLIER_PAYMENT', ?, ?, 0.00, ?, ?)`,
+          [
+            vendor_id,
+            purchaseId,
+            paymentId,
+            date || new Date(),
+            initialPayNo,
+            (credit_damaged_advance && damaged_advance_amount > 0)
+              ? (actualFreshPaid > 0
+                  ? `Payment for ${purchaseNo} (includes ₹${damaged_advance_amount.toFixed(2)} Advance Jama for ${total_damaged_units} damaged items on PO ${purchase_order_id ? `#PO-${purchase_order_id}` : purchaseNo})`
+                  : `Advance Jama for ${total_damaged_units} damaged items on PO ${purchase_order_id ? `#PO-${purchase_order_id}` : purchaseNo}`)
+              : `Initial Payment for ${purchaseNo}`,
+            effectivePayment,
+            newBal > 0 ? newBal : -newAdv
+          ]
+        );
+      }
     }
 
     await connection.commit();
@@ -1825,11 +1876,12 @@ export const deletePurchase = async (req, res, next) => {
       const totPaid = Number(paySum[0].total || 0);
       
       const diff = (netP + openBal) - totPaid;
-      const newBal = Math.max(0, diff);
+      const newBal = diff > 0.005 ? Number(diff.toFixed(2)) : 0;
+      const newAdv = diff < -0.005 ? Number(Math.abs(diff).toFixed(2)) : 0;
 
       await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-        [grossP, totPaid, newBal, vendor_id]
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, newAdv, vendor_id]
       );
     }
 
@@ -2824,10 +2876,12 @@ export const createGRN = async (req, res, next) => {
         const grossP = Number(invSum[0].total || 0);
         const totPaid = Math.max(Number(paidInvSum[0].total || 0), Number(paySum[0].total || 0));
         const newBal = Number(Number(unpaidDueSum[0].total || 0).toFixed(2));
+        const diffGRN = (grossP - Number(retSum[0].total || 0)) - totPaid;
+        const newAdvGRN = diffGRN < 0 ? Number(Math.abs(diffGRN).toFixed(2)) : 0;
 
         await connection.query(
-          'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-          [grossP, totPaid, newBal, vendor_id]
+          'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+          [grossP, totPaid, newBal, newAdvGRN, vendor_id]
         );
 
         await connection.query(
@@ -2961,5 +3015,127 @@ export const getGRNsForPO = async (req, res, next) => {
     return res.status(200).json({ success: true, grns });
   } catch (error) {
     next(error);
+  }
+};
+// @desc    Finalize PO and credit remaining/damaged goods advance to vendor (Tarika 2)
+// @route   POST /api/purchases/orders/:id/finalize-with-advance
+// @access  Private
+export const finalizePOWithAdvance = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+    const {
+      advance_amount = 0,
+      reason = 'Remaining undelivered / damaged goods payment credited as Advance Jama (Tarika 2)',
+      payment_mode = 'Cash',
+      cancelled_units = 0
+    } = req.body;
+
+    const [orders] = await connection.query('SELECT * FROM purchase_orders WHERE id = ?', [id]);
+    if (orders.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Purchase Order not found.' });
+    }
+    const po = orders[0];
+    const vendor_id = po.vendor_id;
+
+    // 1. Lock and finalize PO status to Completed
+    await connection.query('UPDATE purchase_orders SET status = "Completed" WHERE id = ?', [id]);
+
+    const creditAmount = Number(advance_amount || 0);
+    let paymentNo = null;
+
+    if (creditAmount > 0) {
+      const year = new Date().getFullYear();
+      const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`VPAY-%-${year}`]);
+      let maxSeq = 0;
+      for (const row of allPays) {
+        if (row.payment_no) {
+          const parts = row.payment_no.split('-');
+          const seq = parseInt(parts[1], 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+      paymentNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+
+      const validPaymentModes = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'NEFT/RTGS', 'Other'];
+      const resolvedPaymentMode = (payment_mode && validPaymentModes.includes(payment_mode))
+        ? payment_mode
+        : (payment_mode === 'Credit' ? 'Other' : 'Cash');
+
+      const remarksText = `Tarika 2 Advance Jama for PO #${po.purchase_order_no}: ${reason} (${cancelled_units ? `${cancelled_units} items` : 'Excess payment'})`;
+
+      const [payResult] = await connection.query(
+        `INSERT INTO supplier_payments 
+          (payment_no, vendor_id, purchase_id, payment_date, amount, payment_mode, reference_no, remarks, created_by)
+         VALUES (?, ?, NULL, NOW(), ?, ?, ?, ?, ?)`,
+        [
+          paymentNo,
+          vendor_id,
+          creditAmount,
+          resolvedPaymentMode,
+          `PO-${po.purchase_order_no}`,
+          remarksText,
+          req.user ? req.user.id : 1
+        ]
+      );
+      const paymentId = payResult.insertId;
+
+      // Single Source of Truth Supplier Balance Calculation
+      const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+      const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
+      const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+      const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+      if (vRow.length > 0) {
+        const grossP = Number(invSum[0].total || 0);
+        const retP = Number(retSum[0].total || 0);
+        const netP = Math.max(0, grossP - retP);
+        const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+        const totPaid = Number(paySum[0].total || 0);
+
+        const diff = (netP + openBal) - totPaid;
+        const newBal = diff > 0.005 ? Number(diff.toFixed(2)) : 0;
+        const newAdv = diff < -0.005 ? Number(Math.abs(diff).toFixed(2)) : 0;
+
+        await connection.query(
+          'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+          [grossP, totPaid, newBal, newAdv, vendor_id]
+        );
+
+        // Record in vendor_ledger
+        await connection.query(
+          `INSERT INTO vendor_ledger 
+            (vendor_id, purchase_id, payment_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
+           VALUES (?, NULL, ?, NOW(), 'SUPPLIER_PAYMENT', ?, ?, 0.00, ?, ?)`,
+          [
+            vendor_id,
+            paymentId,
+            paymentNo,
+            remarksText,
+            creditAmount,
+            newBal > 0 ? newBal : -newAdv
+          ]
+        );
+      }
+    }
+
+    await connection.commit();
+    await logActivity(req.user ? req.user.id : 1, 'Finalize PO Tarika 2', 'Purchases', `Finalized PO #${po.purchase_order_no} with ₹${creditAmount} Advance Jama credit`, req.ip);
+
+    return res.status(200).json({
+      success: true,
+      message: creditAmount > 0
+        ? `PO #${po.purchase_order_no} finalized! ₹${creditAmount.toFixed(2)} successfully credited to Vendor Advance Jama (Tarika 2).`
+        : `PO #${po.purchase_order_no} finalized and locked.`
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
   }
 };

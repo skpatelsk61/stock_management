@@ -12,7 +12,9 @@ import {
   XCircleIcon,
   InboxArrowDownIcon,
   EyeIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ShieldCheckIcon,
+  LockClosedIcon
 } from '@heroicons/react/24/outline';
 import { purchaseOrdersAPI, purchasesAPI, settingsAPI } from '../../services/api';
 import PurchaseOrderForm from '../../components/forms/PurchaseOrderForm';
@@ -38,6 +40,13 @@ const PurchaseOrderList = () => {
   const [selectedPO, setSelectedPO] = useState(null);
   const [viewingPO, setViewingPO] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+
+  // Tarika 2 Finalize PO Modal State
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
+  const [finalizePOData, setFinalizePOData] = useState(null);
+  const [finalizeSettlementChoice, setFinalizeSettlementChoice] = useState('FULL_ORDER');
+  const [finalizeCustomAmt, setFinalizeCustomAmt] = useState('');
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [storeSettings, setStoreSettings] = useState({
     storeName: user?.store_name || 'Store',
     storeAddress: user?.address || '',
@@ -162,6 +171,10 @@ const PurchaseOrderList = () => {
         discount: Number(data.discountAmount) || 0,
         gst_amount: Number(data.tax) || 0,
         total: Number(data.total) || 0,
+        paid_amount: Number(data.paid_amount || 0),
+        credit_damaged_advance: Boolean(data.credit_damaged_advance),
+        damaged_advance_amount: Number(data.damaged_advance_amount || 0),
+        total_damaged_units: Number(data.total_damaged_units || 0),
         payment_status: data.paymentStatus || 'Pending',
         delivery_status: data.deliveryStatus || 'Received',
         payment_method: data.paymentMode || 'Cash',
@@ -260,6 +273,91 @@ const PurchaseOrderList = () => {
     }
   };
 
+  const handleOpenFinalizeModal = async (po) => {
+    if (loadingDetails) return;
+    setLoadingDetails(true);
+    try {
+      const res = await purchaseOrdersAPI.getById(po.id);
+      if (res.success && res.order) {
+        setFinalizePOData(res.order);
+        setFinalizeSettlementChoice('FULL_ORDER');
+        setFinalizeCustomAmt('');
+        setShowFinalizeModal(true);
+      } else {
+        dispatch(showToast({ msg: res.message || 'Failed to load purchase order details.', type: 'error' }));
+      }
+    } catch (err) {
+      console.error(err);
+      dispatch(showToast({ msg: 'An error occurred while fetching purchase order details.', type: 'error' }));
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  const handleConfirmFinalize = async () => {
+    if (!finalizePOData || isFinalizing) return;
+    setIsFinalizing(true);
+    try {
+      const ordQty = Number(finalizePOData.total_ordered_quantity || 0);
+      const delQty = Number(finalizePOData.total_delivered_quantity || 0);
+      const damQty = Number(finalizePOData.total_damaged_quantity || 0);
+      const undelQty = Math.max(0, ordQty - delQty);
+      const damVal = Number(finalizePOData.total_damaged_deduction || 0);
+
+      let undelVal = 0;
+      (finalizePOData.items || []).forEach(it => {
+        const o = Number(it.quantity || 0);
+        const d = Number(it.total_delivered ?? it.delivered_quantity ?? 0);
+        const u = Math.max(0, o - d);
+        const p = Number(it.purchase_price || 0);
+        const gst = Number(it.gst || 0);
+        undelVal += u * p * (1 + gst / 100);
+      });
+
+      let advanceAmount = 0;
+      let cancelledUnits = 0;
+      let reason = '';
+
+      if (finalizeSettlementChoice === 'FULL_ORDER') {
+        advanceAmount = Number((damVal + undelVal).toFixed(2));
+        cancelledUnits = damQty + undelQty;
+        reason = `Tarika 2: Paid for all ${ordQty} ordered items; credited ${damQty} damaged (₹${damVal.toFixed(2)}) + ${undelQty} cancelled undelivered (₹${undelVal.toFixed(2)}) as Advance Jama`;
+      } else if (finalizeSettlementChoice === 'DELIVERED') {
+        advanceAmount = Number(damVal.toFixed(2));
+        cancelledUnits = damQty;
+        reason = `Tarika 2: Paid for ${delQty} delivered items; credited ${damQty} damaged (₹${damVal.toFixed(2)}) as Advance Jama`;
+      } else if (finalizeSettlementChoice === 'UNDELIVERED_ONLY') {
+        advanceAmount = Number(undelVal.toFixed(2));
+        cancelledUnits = undelQty;
+        reason = `Tarika 2: Credited ${undelQty} cancelled undelivered items (₹${undelVal.toFixed(2)}) as Advance Jama`;
+      } else if (finalizeSettlementChoice === 'CUSTOM') {
+        advanceAmount = Number(finalizeCustomAmt) || 0;
+        cancelledUnits = undelQty + damQty;
+        reason = `Tarika 2: Custom payment adjustment credited as Advance Jama`;
+      }
+
+      const res = await purchaseOrdersAPI.finalizeWithAdvance(finalizePOData.id, {
+        advance_amount: advanceAmount,
+        cancelled_units: cancelledUnits,
+        reason
+      });
+
+      if (res.success) {
+        toast.success(res.message || 'PO finalized and Advance Jama updated!');
+        setShowFinalizeModal(false);
+        setFinalizePOData(null);
+        fetchPurchaseOrders();
+        window.dispatchEvent(new CustomEvent('vendor-updated'));
+        window.dispatchEvent(new CustomEvent('inventory-updated'));
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || err.message || 'Failed to finalize purchase order');
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
   const handleViewDetails = async (po) => {
     if (loadingDetails) return;
     setLoadingDetails(true);
@@ -330,7 +428,7 @@ const PurchaseOrderList = () => {
       return `
       <tr>
         <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">${item.product_name || 'Product'}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">${item.product_name || 'Product'}${item.measurement_value ? ` <span style="font-size: 9px; color: #b45309; font-weight: bold;">(${item.measurement_value})</span>` : ''}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: center; font-family: monospace; font-size: 9px;">${item.barcode || '—'}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; text-align: center;">${item.category || 'General'}</td>
         <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${item.quantity}</td>
@@ -662,6 +760,17 @@ const PurchaseOrderList = () => {
                           </button>
                         )}
 
+                        {/* Tarika 2: Finalize PO & Credit Advance Jama */}
+                        {!isReadOnly && ['Partially Pending', 'Partially Received', 'Confirmed'].includes(po.status) && (
+                          <button
+                            onClick={() => handleOpenFinalizeModal(po)}
+                            title="Finalize PO & Credit Remaining as Advance Jama (Tarika 2)"
+                            className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg active:scale-90 transition-all cursor-pointer"
+                          >
+                            <ShieldCheckIcon className="w-4 h-4 stroke-[2]" />
+                          </button>
+                        )}
+
                         {/* Cancel order */}
                         {!isReadOnly && ['Draft', 'Pending', 'Sent', 'Confirmed'].includes(po.status) && (
                           <button
@@ -751,6 +860,233 @@ const PurchaseOrderList = () => {
           }}
         />
       </Modal>
+
+      {/* MODAL 5: FINALIZE PO & APPLY TARIKA 2 ADVANCE CREDIT */}
+      {showFinalizeModal && finalizePOData && (() => {
+        const ordQty = Number(finalizePOData.total_ordered_quantity || 0);
+        const delQty = Number(finalizePOData.total_delivered_quantity || 0);
+        const damQty = Number(finalizePOData.total_damaged_quantity || 0);
+        const accQty = Number(finalizePOData.total_accepted_quantity || 0);
+        const undelQty = Math.max(0, ordQty - delQty);
+        const damVal = Number(finalizePOData.total_damaged_deduction || 0);
+
+        let undelVal = 0;
+        let ordVal = 0;
+        let delVal = 0;
+        let accVal = 0;
+        (finalizePOData.items || []).forEach(it => {
+          const o = Number(it.quantity || 0);
+          const d = Number(it.total_delivered ?? it.delivered_quantity ?? 0);
+          const dm = Number(it.total_damaged ?? it.damaged_quantity ?? 0);
+          const a = Math.max(0, d - dm);
+          const u = Math.max(0, o - d);
+          const p = Number(it.purchase_price || 0);
+          const gst = Number(it.gst || 0);
+          const unitRate = p * (1 + gst / 100);
+          undelVal += u * unitRate;
+          ordVal += o * unitRate;
+          delVal += d * unitRate;
+          accVal += a * unitRate;
+        });
+
+        const fullAdvance = Number((damVal + undelVal).toFixed(2));
+
+        return (
+          <Modal
+            isOpen={showFinalizeModal}
+            onClose={() => !isFinalizing && setShowFinalizeModal(false)}
+            title={`Tarika 2: Finalize PO #${finalizePOData.purchase_order_no}`}
+            size="2xl"
+          >
+            <div className="p-6 space-y-5">
+              {/* Header Box */}
+              <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50/70 dark:from-amber-950/40 dark:to-slate-900 border-2 border-amber-300 dark:border-amber-700 rounded-2xl shadow-sm">
+                <div className="flex items-start gap-3">
+                  <span className="text-3xl leading-none mt-0.5">🛡️</span>
+                  <div>
+                    <h3 className="text-sm font-black text-amber-950 dark:text-amber-100 uppercase tracking-wider">
+                      PO Finalize &amp; Advance Jama Settlement (तरीका 2)
+                    </h3>
+                    <p className="text-xs text-amber-900 dark:text-amber-300 mt-1 leading-relaxed">
+                      Supplier: <strong className="font-bold text-slate-900 dark:text-white">{finalizePOData.vendor_name}</strong> | PO #{finalizePOData.purchase_order_no}
+                    </p>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-400 mt-0.5">
+                      Agar purchase invoice pehle save ho chuki hai aur bache huye packets ab nahi mangwane, to unka paisa Supplier ke <strong>Advance Balance (जमा)</strong> me transfer ho jayega.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Breakdown Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                <div className="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Ordered</span>
+                  <span className="text-base font-black text-slate-900 dark:text-white">{ordQty} units</span>
+                  <span className="block text-[10px] text-slate-400 font-mono">₹{ordVal.toFixed(2)}</span>
+                </div>
+                <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                  <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">Accepted / Stock</span>
+                  <span className="text-base font-black text-emerald-700 dark:text-emerald-300">{accQty} units</span>
+                  <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">₹{accVal.toFixed(2)}</span>
+                </div>
+                <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800">
+                  <span className="block text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase">Damaged</span>
+                  <span className="text-base font-black text-rose-700 dark:text-rose-300">{damQty} units</span>
+                  <span className="block text-[10px] text-rose-600 dark:text-rose-400 font-mono">₹{damVal.toFixed(2)}</span>
+                </div>
+                <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800">
+                  <span className="block text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">Undelivered</span>
+                  <span className="text-base font-black text-amber-700 dark:text-amber-300">{undelQty} units</span>
+                  <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-mono">₹{undelVal.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Settlement Choice Radios */}
+              <div className="space-y-2.5">
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Select Payment Done to Supplier:
+                </label>
+
+                {/* Option 1: Full Order Paid (e.g. 20 packets) */}
+                {undelQty > 0 && (
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                    finalizeSettlementChoice === 'FULL_ORDER'
+                      ? 'bg-amber-100/90 dark:bg-amber-900/50 border-amber-400 dark:border-amber-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="finalizeSettlementChoice"
+                      value="FULL_ORDER"
+                      checked={finalizeSettlementChoice === 'FULL_ORDER'}
+                      onChange={() => setFinalizeSettlementChoice('FULL_ORDER')}
+                      className="mt-0.5 w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <div className="flex-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-black text-slate-900 dark:text-white">
+                          Full Order ({ordQty} units) Payment Done (₹{ordVal.toFixed(2)})
+                        </span>
+                        <span className="font-mono font-black text-amber-800 dark:text-amber-300 text-xs bg-amber-200/80 dark:bg-amber-900 px-2 py-0.5 rounded">
+                          +₹{fullAdvance.toFixed(2)} Advance Jama
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                        Aapne pure {ordQty} units ka payment kar diya tha. Accepted bill: {accQty} units (₹{accVal.toFixed(2)}) ban chuka hai. Baaki <strong>{damQty + undelQty} units ({damQty} damaged + {undelQty} undelivered) ka ₹{fullAdvance.toFixed(2)}</strong> Supplier ke <strong>Advance Balance (जमा)</strong> me credit ho jayega.
+                      </p>
+                    </div>
+                  </label>
+                )}
+
+                {/* Option 2: Delivered items paid (e.g. 15 packets) */}
+                {damQty > 0 && (
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                    finalizeSettlementChoice === 'DELIVERED'
+                      ? 'bg-amber-100/90 dark:bg-amber-900/50 border-amber-400 dark:border-amber-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="finalizeSettlementChoice"
+                      value="DELIVERED"
+                      checked={finalizeSettlementChoice === 'DELIVERED'}
+                      onChange={() => setFinalizeSettlementChoice('DELIVERED')}
+                      className="mt-0.5 w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <div className="flex-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-black text-slate-900 dark:text-white">
+                          Only Delivered Items ({delQty} units) Payment Done (₹{delVal.toFixed(2)})
+                        </span>
+                        <span className="font-mono font-black text-amber-800 dark:text-amber-300 text-xs bg-amber-200/80 dark:bg-amber-900 px-2 py-0.5 rounded">
+                          +₹{damVal.toFixed(2)} Advance Jama
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                        Keval {delQty} delivered units ka payment hua tha. Unme se <strong>{damQty} damaged units ka ₹{damVal.toFixed(2)}</strong> Supplier ke Advance Balance (जमा) me credit ho jayega.
+                      </p>
+                    </div>
+                  </label>
+                )}
+
+                {/* Option 3: Custom Amount */}
+                <label className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                  finalizeSettlementChoice === 'CUSTOM'
+                    ? 'bg-amber-100/90 dark:bg-amber-900/50 border-amber-400 dark:border-amber-600 shadow-sm'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+                }`}>
+                  <input
+                    type="radio"
+                    name="finalizeSettlementChoice"
+                    value="CUSTOM"
+                    checked={finalizeSettlementChoice === 'CUSTOM'}
+                    onChange={() => setFinalizeSettlementChoice('CUSTOM')}
+                    className="mt-0.5 w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <div className="flex-1 text-xs">
+                    <span className="font-bold text-slate-900 dark:text-white">Custom Advance Jama Amount</span>
+                    {finalizeSettlementChoice === 'CUSTOM' && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="font-bold text-slate-600 dark:text-slate-400">₹</span>
+                        <input
+                          type="number"
+                          value={finalizeCustomAmt}
+                          onChange={(e) => setFinalizeCustomAmt(e.target.value)}
+                          placeholder="Enter amount to credit"
+                          className="px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white dark:bg-slate-950 text-slate-900 dark:text-white w-48"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </label>
+
+                {/* Option 4: Close without advance */}
+                <label className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                  finalizeSettlementChoice === 'NONE'
+                    ? 'bg-slate-100 dark:bg-slate-800 border-slate-400'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+                }`}>
+                  <input
+                    type="radio"
+                    name="finalizeSettlementChoice"
+                    value="NONE"
+                    checked={finalizeSettlementChoice === 'NONE'}
+                    onChange={() => setFinalizeSettlementChoice('NONE')}
+                    className="mt-0.5 w-4 h-4 text-slate-600 focus:ring-slate-500 cursor-pointer"
+                  />
+                  <div className="flex-1 text-xs">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">No Advance Credit / Only Close PO</span>
+                    <span className="block text-[10px] text-slate-500 font-normal mt-0.5">
+                      Koi advance payment nahi hua tha, keval order ko Completed/Locked mark karna hai.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowFinalizeModal(false)}
+                  disabled={isFinalizing}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFinalize}
+                  disabled={isFinalizing}
+                  className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 rounded-xl shadow-lg shadow-amber-600/20 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  <LockClosedIcon className="w-4 h-4 stroke-[2.2]" />
+                  {isFinalizing ? 'Finalizing...' : 'Confirm & Credit Advance Jama'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* MODAL 4: VIEW PO SUMMARY SHEET */}
       <Modal
@@ -882,7 +1218,21 @@ const PurchaseOrderList = () => {
                       return (
                         <tr key={index} className="hover:bg-slate-50/50">
                           <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-[10px]">{index + 1}</td>
-                          <td className="py-2.5 px-4 text-slate-900 font-bold">{item.product_name}</td>
+                          <td className="py-2.5 px-4 text-slate-900 font-bold">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{item.product_name}</span>
+                              {item.brand && (
+                                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                  {item.brand}
+                                </span>
+                              )}
+                              {item.measurement_value && (
+                                <span className="text-[10px] font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                                  ⚖️ {item.measurement_value}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{item.barcode || '—'}</td>
                           <td className="py-2.5 px-4 text-center text-slate-500">{item.category || 'General'}</td>
                           <td className="py-2.5 px-4 text-center tabular-nums">

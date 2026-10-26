@@ -16,6 +16,7 @@ export const getVendors = async (req, res, next) => {
              COALESCE((SELECT SUM(pr.total_amount) FROM purchase_returns pr WHERE pr.vendor_id = v.id AND (pr.status IS NULL OR pr.status != 'Void')), 0) as total_returns_calc,
              COALESCE((SELECT SUM(p.paid_amount) FROM purchases p WHERE p.vendor_id = v.id AND p.payment_status != 'Void'), 0) as total_paid_purchases_calc,
              COALESCE((SELECT SUM(sp.amount) FROM supplier_payments sp WHERE sp.vendor_id = v.id), 0) as total_supplier_payments_calc,
+             COALESCE((SELECT COUNT(sp.id) FROM supplier_payments sp WHERE sp.vendor_id = v.id), 0) as total_supplier_payments_count,
              COALESCE((SELECT SUM(
                 CASE 
                   WHEN p.payment_status = 'Paid' THEN 0 
@@ -50,29 +51,23 @@ export const getVendors = async (req, res, next) => {
       const netPurchases = Math.max(0, grossPurchases - totalReturns);
       const paidOnPurchases = Number(v.total_paid_purchases_calc || 0);
       const paidViaSupplierPayments = Number(v.total_supplier_payments_calc || 0);
-      const totalPaid = Math.max(paidOnPurchases, paidViaSupplierPayments, Number(v.total_paid || 0));
+      const spCount = Number(v.total_supplier_payments_count || 0);
+      const totalPaid = (spCount > 0 || paidViaSupplierPayments !== 0)
+        ? paidViaSupplierPayments
+        : Math.max(paidOnPurchases, Number(v.total_paid || 0));
 
-      const unpaidDue = Number(v.unpaid_invoices_due || 0);
       const openingBal = v.opening_balance_type === 'Advance' ? -Number(v.opening_balance || 0) : Number(v.opening_balance || 0);
-
-      // Remaining due owed to vendor is unpaid invoices due + opening payable
-      let remainingPayable = unpaidDue + (openingBal > 0 ? openingBal : 0);
-      let advanceCredit = openingBal < 0 ? Math.abs(openingBal) : 0;
-
-      // Check if unallocated supplier payments create advance credit
-      if (paidViaSupplierPayments > netPurchases + openingBal) {
-        advanceCredit += (paidViaSupplierPayments - (netPurchases + openingBal));
-      }
+      const netObligation = (netPurchases + openingBal) - totalPaid;
 
       let outstandingBalance = 0;
       let advanceBalance = 0;
       let paymentStatus = 'Paid';
 
-      if (remainingPayable > advanceCredit) {
-        outstandingBalance = Number((remainingPayable - advanceCredit).toFixed(2));
+      if (netObligation > 0.005) {
+        outstandingBalance = Number(netObligation.toFixed(2));
         paymentStatus = totalPaid > 0 ? 'Partial' : 'Pending';
-      } else if (advanceCredit > remainingPayable) {
-        advanceBalance = Number((advanceCredit - remainingPayable).toFixed(2));
+      } else if (netObligation < -0.005) {
+        advanceBalance = Number(Math.abs(netObligation).toFixed(2));
         paymentStatus = 'Advance';
       } else {
         outstandingBalance = 0;
@@ -579,27 +574,28 @@ export const getVendorLedger = async (req, res, next) => {
     const totalReturns = returns.reduce((sum, r) => sum + Number(r.credit_amount), 0);
     const netPurchases = Math.max(0, totalPurchases - totalReturns);
 
-    let remainingPayable = unpaidInvoicesDue + (initOpening > 0 ? initOpening : 0);
-    let advanceCredit = initOpening < 0 ? Math.abs(initOpening) : 0;
-
-    if (totalPaid > netPurchases + initOpening) {
-      advanceCredit += (totalPaid - (netPurchases + initOpening));
-    }
+    const netObligation = (netPurchases + initOpening) - totalPaid;
 
     let outstandingBalance = 0;
     let advanceBalance = 0;
     let paymentStatus = 'Paid';
 
-    if (remainingPayable > advanceCredit) {
-      outstandingBalance = Number((remainingPayable - advanceCredit).toFixed(2));
+    if (netObligation > 0.005) {
+      outstandingBalance = Number(netObligation.toFixed(2));
       paymentStatus = totalPaid > 0 ? 'Partial' : 'Pending';
-    } else if (advanceCredit > remainingPayable) {
-      advanceBalance = Number((advanceCredit - remainingPayable).toFixed(2));
+    } else if (netObligation < -0.005) {
+      advanceBalance = Number(Math.abs(netObligation).toFixed(2));
       paymentStatus = 'Advance';
     } else {
-      outstandingBalance = 0;
-      advanceBalance = 0;
-      paymentStatus = 'Paid';
+      const storedAdv = Number(vendor.advance_balance || 0);
+      if (storedAdv > 0) {
+        advanceBalance = storedAdv;
+        paymentStatus = 'Advance';
+      } else {
+        outstandingBalance = 0;
+        advanceBalance = 0;
+        paymentStatus = 'Paid';
+      }
     }
 
     return res.status(200).json({
@@ -815,8 +811,11 @@ export const recordSupplierPayment = async (req, res, next) => {
         const [pRows] = await connection.query('SELECT id, total, COALESCE(paid_amount, 0) as paid_amount FROM purchases WHERE id = ? AND vendor_id = ?', [purchase_id, vendor_id]);
         if (pRows.length > 0) {
           const p = pRows[0];
-          const newPaid = Number(p.paid_amount || 0) + absAmount;
           const pTotal = Number(p.total || 0);
+          const currentPaid = Number(p.paid_amount || 0);
+          const invDue = Math.max(0, pTotal - currentPaid);
+          const alloc = Math.min(absAmount, invDue);
+          const newPaid = currentPaid + alloc;
           let newStatus = 'Pending';
           if (newPaid >= pTotal) {
             newStatus = 'Paid';
@@ -866,7 +865,7 @@ export const recordSupplierPayment = async (req, res, next) => {
     const [invSumSync] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
     const [retSumSync] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND (status IS NULL OR status != "Void")', [vendor_id]);
     const [paidInvSync] = await connection.query('SELECT COALESCE(SUM(paid_amount), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
-    const [paySumSync] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [paySumSync] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
     const [unpaidDueSync] = await connection.query(`
       SELECT COALESCE(SUM(
         CASE 
@@ -880,36 +879,19 @@ export const recordSupplierPayment = async (req, res, next) => {
     const retPSync = Number(retSumSync[0].total || 0);
     const netPSync = Math.max(0, grossPSync - retPSync);
     const openBSync = vendor.opening_balance_type === 'Advance' ? -Number(vendor.opening_balance || 0) : Number(vendor.opening_balance || 0);
-    const totPaidSync = Math.max(Number(paidInvSync[0].total || 0), Number(paySumSync[0].total || 0));
+    const spCountSync = Number(paySumSync[0]?.count || 0);
+    const totPaidSync = spCountSync > 0
+      ? Number(paySumSync[0]?.total || 0)
+      : Math.max(Number(paidInvSync[0]?.total || 0), Number(vendor.total_paid || 0));
 
-    const unpaidDueAmt = Number(unpaidDueSync[0].total || 0);
-    let remPayable = unpaidDueAmt + (openBSync > 0 ? openBSync : 0);
-    let advCredit = openBSync < 0 ? Math.abs(openBSync) : 0;
+    const netObligationSync = (netPSync + openBSync) - totPaidSync;
+    const newOutstanding = netObligationSync > 0.005 ? Number(netObligationSync.toFixed(2)) : 0;
+    const newAdvance = netObligationSync < -0.005 ? Number(Math.abs(netObligationSync).toFixed(2)) : 0;
 
-    const spAmount = Number(paySumSync[0].total || 0);
-    if (spAmount > netPSync + openBSync) {
-      advCredit += (spAmount - (netPSync + openBSync));
-    }
-
-    let newOutstanding = 0;
-    let newAdvance = 0;
-    if (remPayable > advCredit) {
-      newOutstanding = Number((remPayable - advCredit).toFixed(2));
-    } else if (advCredit > remPayable) {
-      newAdvance = Number((advCredit - remPayable).toFixed(2));
-    }
-
-    try {
-      await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
-        [grossPSync, totPaidSync, newOutstanding, newAdvance, vendor_id]
-      );
-    } catch {
-      await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-        [grossPSync, totPaidSync, newOutstanding, vendor_id]
-      );
-    }
+    await connection.query(
+      'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+      [grossPSync, totPaidSync, newOutstanding, newAdvance, vendor_id]
+    );
 
     // Save Vendor Ledger entry
     const debitAmt = (isRefund || isAddDebt) ? absAmount : 0.00;

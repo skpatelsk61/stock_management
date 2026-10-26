@@ -20,6 +20,7 @@ import {
   ChevronRightIcon,
   ShoppingCartIcon,
   CurrencyDollarIcon,
+  CurrencyRupeeIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import Modal from '../../components/common/Modal';
@@ -45,18 +46,28 @@ const formatExpiryDate = (dateStr) => {
   return d.toLocaleDateString('en-IN');
 };
 
+let cachedProductListState = null;
+try {
+  const stored = sessionStorage.getItem('cached_product_list_state');
+  if (stored) cachedProductListState = JSON.parse(stored);
+} catch (e) {}
+
 const ProductList = () => {
   const { user } = useAppSelector((state) => state.auth);
   const isReadOnly = user?.role === 'Super Admin';
 
-  const [products, setProducts] = useState([]);
-  const [categoriesList, setCategoriesList] = useState([]);
+  const [products, setProducts] = useState(cachedProductListState?.products || []);
+  const [categoriesList, setCategoriesList] = useState(cachedProductListState?.categoriesList || []);
   const [showModal, setShowModal] = useState(false);
+  const [priceModalProduct, setPriceModalProduct] = useState(null);
+  const [quickPrices, setQuickPrices] = useState({ sellingPrice: '', mrp: '', purchasePrice: '', gst: '0' });
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [quickSelectedVariantId, setQuickSelectedVariantId] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null });
   const [activeActionsMenu, setActiveActionsMenu] = useState(null);
   const [dbOffline, setDbOffline] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedProductListState);
   const [selectedVariantIds, setSelectedVariantIds] = useState({});
 
   // Search & Filter state variables
@@ -77,8 +88,8 @@ const ProductList = () => {
   const [showImportModal, setShowImportModal] = useState(false);
 
   // Fetch products and categories directly from API
-  const fetchProductsAndCategories = async () => {
-    setLoading(true);
+  const fetchProductsAndCategories = async (forceSpinner = false) => {
+    if (!cachedProductListState || forceSpinner) setLoading(true);
     try {
       const [catData, prodData] = await Promise.all([
         categoriesAPI.getAll().catch(err => {
@@ -88,7 +99,9 @@ const ProductList = () => {
         productsAPI.getAll()
       ]);
 
+      let validCategories = categoriesList;
       if (catData?.success && Array.isArray(catData.categories)) {
+        validCategories = catData.categories;
         setCategoriesList(catData.categories);
       }
       
@@ -145,14 +158,18 @@ const ProductList = () => {
           };
         });
         setProducts(mapped);
-      } else {
+        cachedProductListState = { products: mapped, categoriesList: validCategories };
+        try {
+          sessionStorage.setItem('cached_product_list_state', JSON.stringify(cachedProductListState));
+        } catch (e) {}
+      } else if (!cachedProductListState) {
         setProducts([]);
       }
       setDbOffline(false);
     } catch (error) {
       console.error('Backend products API error:', error);
       setDbOffline(false);
-      setProducts([]);
+      if (!cachedProductListState) setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -388,7 +405,68 @@ const ProductList = () => {
     setShowModal(true);
   };
 
-  const handleOpenEditForm = (product, group = null) => {
+  const handleOpenQuickPrice = (product, group = null) => {
+    const variants = group?.variants && group.variants.length > 0 ? group.variants : [product];
+    setPriceModalProduct({ ...product, variants });
+    setQuickSelectedVariantId(product.id);
+    setQuickPrices({
+      sellingPrice: product.sellingPrice ?? product.selling_price ?? '',
+      mrp: product.mrp ?? product.max_retail_price ?? '',
+      purchasePrice: product.purchasePrice ?? product.purchase_price ?? '',
+      gst: product.gst !== undefined && product.gst !== null ? String(product.gst) : '0',
+    });
+    setActiveActionsMenu(null);
+  };
+
+  const handleSwitchQuickVariant = (variantId) => {
+    setQuickSelectedVariantId(variantId);
+    const v = priceModalProduct?.variants?.find(item => item.id === variantId);
+    if (v) {
+      setQuickPrices({
+        sellingPrice: v.sellingPrice ?? v.selling_price ?? '',
+        mrp: v.mrp ?? v.max_retail_price ?? '',
+        purchasePrice: v.purchasePrice ?? v.purchase_price ?? '',
+        gst: v.gst !== undefined && v.gst !== null ? String(v.gst) : '0',
+      });
+    }
+  };
+
+  const handleSaveQuickPrice = async (e) => {
+    e.preventDefault();
+    if (!priceModalProduct) return;
+    const targetVariant = priceModalProduct.variants?.find(v => v.id === quickSelectedVariantId) || priceModalProduct;
+    
+    if (quickPrices.sellingPrice === '' || Number(quickPrices.sellingPrice) < 0) {
+      toast.error('Please enter a valid selling price');
+      return;
+    }
+
+    try {
+      setQuickSaving(true);
+      const data = new FormData();
+      data.append('name', targetVariant.name);
+      data.append('barcode', targetVariant.barcode || '');
+      data.append('unit', targetVariant.unit || 'Packet');
+      if (targetVariant.category_id) data.append('category_id', targetVariant.category_id);
+      if (targetVariant.brand_id) data.append('brand_id', targetVariant.brand_id);
+      data.append('measurement_value', targetVariant.measurement_value || '');
+      data.append('selling_price', quickPrices.sellingPrice || 0);
+      data.append('mrp', quickPrices.mrp || quickPrices.sellingPrice || 0);
+      data.append('purchase_price', quickPrices.purchasePrice || 0);
+      data.append('gst', quickPrices.gst || 0);
+
+      await productsAPI.update(targetVariant.id, data);
+      toast.success(`Price updated to ₹${quickPrices.sellingPrice} successfully!`);
+      setPriceModalProduct(null);
+      fetchProductsAndCategories();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update price');
+    } finally {
+      setQuickSaving(false);
+    }
+  };
+
+  const handleOpenEditForm = (product, group = null, focusOnPrice = false) => {
     const nameClean = (product.name || '').trim().toLowerCase();
     const brandClean = (product.brand || '').trim().toLowerCase();
     const matchingVariants = group?.variants || products.filter(item =>
@@ -398,6 +476,7 @@ const ProductList = () => {
 
     setSelectedProduct({
       ...product,
+      focusPricing: focusOnPrice,
       existingVariants: matchingVariants && matchingVariants.length > 0 ? matchingVariants : [product]
     });
     setShowModal(true);
@@ -500,7 +579,7 @@ const ProductList = () => {
         return;
       }
 
-      const buildVariantFormData = (weightVal, barcodeVal) => {
+      const buildVariantFormData = (weightVal, barcodeVal, sPrice, mrpVal, pPrice, gstVal) => {
         const data = new FormData();
         data.append('name', formData.name);
         data.append('barcode', barcodeVal || '');
@@ -517,10 +596,15 @@ const ProductList = () => {
         if (formData.sub_category_id) data.append('sub_category_id', formData.sub_category_id);
         data.append('measurement_value', weightVal || '');
         
-        data.append('purchase_price', formData.purchasePrice || 0);
-        data.append('selling_price', formData.sellingPrice || 0);
-        data.append('mrp', formData.mrp || formData.sellingPrice || 0);
-        data.append('gst', formData.gst || 0);
+        const finalSelling = sPrice !== undefined && sPrice !== '' ? sPrice : (formData.sellingPrice || 0);
+        const finalMrp = mrpVal !== undefined && mrpVal !== '' ? mrpVal : (formData.mrp || finalSelling || 0);
+        const finalPurchase = pPrice !== undefined && pPrice !== '' ? pPrice : (formData.purchasePrice || 0);
+        const finalGst = gstVal !== undefined && gstVal !== '' ? gstVal : (formData.gst || 0);
+
+        data.append('purchase_price', finalPurchase);
+        data.append('selling_price', finalSelling);
+        data.append('mrp', finalMrp);
+        data.append('gst', finalGst);
         data.append('min_stock', formData.minimumStock || 5);
         data.append('max_stock', formData.maximumStock || 100);
         data.append('expiry_date', formData.expiryDate || '');
@@ -554,7 +638,27 @@ const ProductList = () => {
           v => v.measurement_value && weightsToProcess.includes(v.measurement_value)
         );
         for (const kv of keptVariants) {
-          const updateData = buildVariantFormData(kv.measurement_value, kv.barcode);
+          let sPrice = formData.sellingPrice;
+          let mrpVal = formData.mrp;
+          let pPrice = formData.purchasePrice;
+          let gstVal = formData.gst;
+
+          // If variantPrices has specific price configured for this variant ID:
+          if (formData.variantPrices && formData.variantPrices[kv.id]) {
+            const vp = formData.variantPrices[kv.id];
+            sPrice = vp.sellingPrice !== '' ? vp.sellingPrice : (kv.sellingPrice ?? kv.selling_price ?? 0);
+            mrpVal = vp.mrp !== '' ? vp.mrp : (kv.mrp ?? 0);
+            pPrice = vp.purchasePrice !== '' ? vp.purchasePrice : (kv.purchasePrice ?? kv.purchase_price ?? 0);
+            gstVal = vp.gst !== '' ? vp.gst : (kv.gst ?? 0);
+          } else if (existingVariants.length > 1 && kv.id !== selectedProduct.id) {
+            // Keep untouched variant's existing prices
+            sPrice = kv.sellingPrice ?? kv.selling_price ?? 0;
+            mrpVal = kv.mrp ?? 0;
+            pPrice = kv.purchasePrice ?? kv.purchase_price ?? 0;
+            gstVal = kv.gst ?? 0;
+          }
+
+          const updateData = buildVariantFormData(kv.measurement_value, kv.barcode, sPrice, mrpVal, pPrice, gstVal);
           await productsAPI.update(kv.id, updateData);
         }
 
@@ -829,7 +933,7 @@ const ProductList = () => {
     <div className="space-y-6 pb-10 select-none">
 
       {/* APP HEADER WRAPPER CONTAINER BLOCK */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white dark:bg-slate-900 p-6 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white dark:bg-slate-900 p-4 sm:p-6 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight">Products</h1>
           <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">Manage all inventory items</p>
@@ -887,7 +991,7 @@ const ProductList = () => {
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4"
       >
         <StatsCard title="Total Products" value={summaryCounters.total} icon={ShoppingCartIcon} subtext="Catalog Lines" color="blue" loading={loading} />
         <StatsCard title="Inventory Value" value={`₹${summaryCounters.valuation}`} icon={CurrencyDollarIcon} subtext="Stock Worth" color="green" loading={loading} />
@@ -929,7 +1033,7 @@ const ProductList = () => {
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4"
+        className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4"
       >
         <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
           <FunnelIcon className="w-4 h-4 text-slate-400" />
@@ -1232,9 +1336,9 @@ const ProductList = () => {
                                   <div className="absolute right-0 mt-1 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200/85 dark:border-slate-700 z-50 py-1.5 text-left transform origin-top-right transition-all">
                                     {!isReadOnly && (
                                       <>
-                                        <button onClick={() => handleOpenEditForm(p, group)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
-                                          <PencilIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Edit details
-                                        </button>
+                                        <button onClick={() => handleOpenEditForm(p, group, false)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
+                                            <PencilIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Edit details
+                                          </button>
                                         <button onClick={() => handleDuplicateProduct(p)} className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer">
                                           <DocumentDuplicateIcon className="w-3.5 h-3.5 text-emerald-500" /> Duplicate
                                         </button>
@@ -1374,6 +1478,192 @@ const ProductList = () => {
             setSelectedProduct(null);
           }}
         />
+      </Modal>
+
+            {/* QUICK PRICE UPDATE MODAL */}
+      <Modal
+        isOpen={Boolean(priceModalProduct)}
+        onClose={() => setPriceModalProduct(null)}
+        title={
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 text-amber-600 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-sm">
+              <CurrencyRupeeIcon className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                Update Price: {priceModalProduct?.name}
+              </h2>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">Kirana Fast Price &amp; Rate Adjustment</p>
+            </div>
+          </div>
+        }
+        size="lg"
+      >
+        {priceModalProduct && (
+          <form onSubmit={handleSaveQuickPrice} className="p-6 space-y-5 bg-white dark:bg-slate-900">
+            {/* Variant selector pills if multi-variant */}
+            {priceModalProduct.variants && priceModalProduct.variants.length > 1 && (
+              <div className="space-y-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  Select Pack Variant to Update:
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {priceModalProduct.variants.map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => handleSwitchQuickVariant(v.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                        quickSelectedVariantId === v.id
+                          ? 'bg-amber-500 border-amber-500 text-white shadow-sm'
+                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>⚖️ {v.measurement_value || v.unit}</span>
+                      <span className="font-mono font-black text-[11px] opacity-90">(₹{v.sellingPrice ?? v.selling_price ?? 0})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Product Summary Badge */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/80 dark:border-slate-700/80 text-xs font-semibold">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500">Selected:</span>
+                <span className="font-black text-slate-900 dark:text-white">
+                  {priceModalProduct.variants?.find(v => v.id === quickSelectedVariantId)?.name || priceModalProduct.name}
+                </span>
+                <span className="font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[11px]">
+                  ⚖️ {priceModalProduct.variants?.find(v => v.id === quickSelectedVariantId)?.measurement_value || priceModalProduct.unit || 'Standard'}
+                </span>
+              </div>
+              {priceModalProduct.variants?.find(v => v.id === quickSelectedVariantId)?.barcode && (
+                <span className="font-mono text-[11px] text-slate-400">
+                  Barcode: {priceModalProduct.variants?.find(v => v.id === quickSelectedVariantId)?.barcode}
+                </span>
+              )}
+            </div>
+
+            {/* Inputs Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 1. New Selling Price */}
+              <div className="sm:col-span-2 bg-emerald-50/30 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800">
+                <label className="block text-xs font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>New Customer Selling Price / बिक्री दर (₹) *</span>
+                  <span className="text-[10px] text-emerald-600 font-bold">Store POS Rate</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 text-emerald-600 font-black text-lg">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    autoFocus
+                    required
+                    value={quickPrices.sellingPrice}
+                    onChange={(e) => setQuickPrices((prev) => ({ ...prev, sellingPrice: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full pl-9 pr-4 py-2.5 text-lg font-mono font-black text-emerald-900 dark:text-emerald-100 bg-white dark:bg-slate-900 border-2 border-emerald-400 dark:border-emerald-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                  />
+                </div>
+              </div>
+
+              {/* 2. MRP */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  MRP / अधिकतम खुदरा मूल्य (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={quickPrices.mrp}
+                    onChange={(e) => setQuickPrices((prev) => ({ ...prev, mrp: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-amber-500"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1">Printed MRP on packaging</p>
+              </div>
+
+              {/* 3. Purchase Cost */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  Purchase Price / खरीद लागत (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={quickPrices.purchasePrice}
+                    onChange={(e) => setQuickPrices((prev) => ({ ...prev, purchasePrice: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-amber-500"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1">Base buy / wholesale rate</p>
+              </div>
+
+              {/* 4. GST Rate */}
+              <div className="sm:col-span-2">
+                <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
+                  GST Rate (%)
+                </label>
+                <select
+                  value={quickPrices.gst}
+                  onChange={(e) => setQuickPrices((prev) => ({ ...prev, gst: e.target.value }))}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none cursor-pointer"
+                >
+                  <option value="0">0% (Exempted)</option>
+                  <option value="5">5% (Essential)</option>
+                  <option value="12">12% (Standard 1)</option>
+                  <option value="18">18% (Standard 2)</option>
+                  <option value="28">28% (Luxury)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Calculations Badge */}
+            {(Number(quickPrices.sellingPrice) > 0 || Number(quickPrices.mrp) > 0) && (
+              <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                {Number(quickPrices.mrp) > Number(quickPrices.sellingPrice) && Number(quickPrices.sellingPrice) > 0 && (
+                  <span className="font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                    🏷️ Customer Discount: ₹{(Number(quickPrices.mrp) - Number(quickPrices.sellingPrice)).toFixed(2)} ({(((Number(quickPrices.mrp) - Number(quickPrices.sellingPrice)) / Number(quickPrices.mrp)) * 100).toFixed(1)}% OFF)
+                  </span>
+                )}
+                {Number(quickPrices.sellingPrice) > Number(quickPrices.purchasePrice) && Number(quickPrices.purchasePrice) > 0 && (
+                  <span className="font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                    📈 Margin: ₹{(Number(quickPrices.sellingPrice) - Number(quickPrices.purchasePrice)).toFixed(2)} ({(((Number(quickPrices.sellingPrice) - Number(quickPrices.purchasePrice)) / Number(quickPrices.sellingPrice)) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPriceModalProduct(null)}
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={quickSaving}
+                className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-60"
+              >
+                <CurrencyRupeeIcon className="w-4 h-4 stroke-[2.5]" />
+                {quickSaving ? 'Saving New Price...' : 'Save New Price (₹)'}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* ENTERPRISE PRODUCT IMPORT WIZARD MODAL */}
