@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import PermissionRoute from './components/common/PermissionRoute';
 import MainLayout from './components/layout/MainLayout';
+import TopProgressBar from './components/common/TopProgressBar';
 
 // Lazy Loaded Pages for Instant Initial Loading & Code Splitting
 const Landing = lazy(() => import('./pages/Landing/Landing'));
@@ -89,6 +90,7 @@ import { Toaster } from 'react-hot-toast';
 function App() {
   return (
     <BrowserRouter>
+      <TopProgressBar />
       <Toaster 
         position="top-right" 
         toastOptions={{

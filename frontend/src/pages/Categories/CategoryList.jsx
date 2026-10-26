@@ -23,7 +23,7 @@ const CategoryList = () => {
   const [activeTab, setActiveTab] = useState('main');
 
   // Loading States
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [btnLoading, setBtnLoading] = useState(false);
 
   // Error & Toast Message

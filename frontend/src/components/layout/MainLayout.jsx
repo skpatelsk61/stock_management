@@ -1,4 +1,5 @@
-import { Outlet } from 'react-router-dom';
+import { Suspense } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -7,6 +8,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { setSidebarOpen } from '../../store/slices/sidebarSlice';
 import KeyboardShortcutsModal from '../common/KeyboardShortcutsModal';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import PageContentSkeleton from '../common/PageContentSkeleton';
 
 /* ── Match Sidebar constants exactly ── */
 const SIDEBAR_COLLAPSED_W = 72;  // px — icons-only
@@ -14,6 +16,7 @@ const SIDEBAR_EXPANDED_W  = 260; // px — full width
 
 const MainLayout = () => {
   const dispatch = useAppDispatch();
+  const location = useLocation();
   const { user } = useAppSelector((state) => state.auth);
   const { isPinned } = useAppSelector((state) => state.sidebar);
   const { showShortcutsModal, openShortcutsModal, closeShortcutsModal } = useKeyboardShortcuts();
@@ -37,12 +40,12 @@ const MainLayout = () => {
     animate: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.4, ease: [0.25, 1, 0.5, 1] },
+      transition: { duration: 0.3, ease: [0.25, 1, 0.5, 1] },
     },
     exit: {
       opacity: 0,
       y: -12,
-      transition: { duration: 0.25, ease: 'easeIn' },
+      transition: { duration: 0.2, ease: 'easeIn' },
     },
   };
 
@@ -109,14 +112,16 @@ const MainLayout = () => {
               <div className="w-full max-w-[1600px] flex-1 flex flex-col px-4 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6 gap-6">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={window.location.pathname}
+                    key={location.pathname}
                     variants={pageTransitionVariants}
                     initial="initial"
                     animate="animate"
                     exit="exit"
                     className="w-full flex-1 flex flex-col"
                   >
-                    <Outlet />
+                    <Suspense fallback={<PageContentSkeleton />}>
+                      <Outlet />
+                    </Suspense>
                   </motion.div>
                 </AnimatePresence>
               </div>

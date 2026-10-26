@@ -24,7 +24,7 @@ const Settings = () => {
     user && user.role !== 'Super Admin' && user.subscription_status === 'Expired' ? 'profile' : 'general'
   );
   const [dbOffline, setDbOffline] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Store Logo State & References
   const [activeLogo, updateActiveLogo] = useStoreLogo(user);
