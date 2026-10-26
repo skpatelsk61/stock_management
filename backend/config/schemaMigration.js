@@ -170,6 +170,13 @@ export const runCategorySchemaMigrations = async (pool) => {
       console.warn('[Schema Migration] purchases columns check notice:', purErr.message);
     }
 
+    // 4e. Ensure supplier_payments table payment_mode is VARCHAR(50)
+    try {
+      await pool.query("ALTER TABLE supplier_payments MODIFY COLUMN payment_mode VARCHAR(50) NOT NULL DEFAULT 'Cash'");
+    } catch (spErr) {
+      console.warn('[Schema Migration] supplier_payments payment_mode check notice:', spErr.message);
+    }
+
     // 4a. Ensure customers table has notes, opening_balance, credit_limit, outstanding_balance, payment_mode, etc.
     try {
       const [custCols] = await pool.query('DESCRIBE customers');

@@ -34,13 +34,19 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+let cachedSalesState = null;
+try {
+  const stored = sessionStorage.getItem('cached_sales_state');
+  if (stored) cachedSalesState = JSON.parse(stored);
+} catch (e) {}
+
 const SalesList = () => {
   const { user } = useAppSelector((state) => state.auth);
   const dispatch = useAppDispatch();
   const isReadOnly = user?.role === 'Super Admin';
 
-  const [sales, setSales] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [sales, setSales] = useState(cachedSalesState?.sales || []);
+  const [loading, setLoading] = useState(!cachedSalesState);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPOSMode, setIsPOSMode] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null });

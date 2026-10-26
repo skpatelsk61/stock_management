@@ -454,7 +454,7 @@ const Header = ({ onOpenShortcuts }) => {
                 </button>
 
                 {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 z-50 overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-[calc(100vw-28px)] max-w-sm sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 z-50 overflow-hidden">
                     <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/80">
                       <div>
                         <h3 className="font-bold text-slate-900 dark:text-white text-xs">Notifications</h3>

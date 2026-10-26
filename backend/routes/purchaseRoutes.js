@@ -11,7 +11,8 @@ import {
   deletePurchaseOrder,
   createGRN,
   getGRNsForPO,
-  getNextVendorBatch
+  getNextVendorBatch,
+  finalizePOWithAdvance
 } from '../controllers/purchaseController.js';
 import { protect, checkPermission } from '../middleware/authMiddleware.js';
 import { readOnlyForSuperAdmin } from '../middleware/readOnlyMiddleware.js';
@@ -28,6 +29,7 @@ router.get('/orders', checkPermission('view_purchases'), getPurchaseOrders);
 router.get('/orders/:id', checkPermission('view_purchases'), getPurchaseOrderById);
 router.post('/orders', checkPermission('create_purchases'), readOnlyForSuperAdmin, createPurchaseOrder);
 router.put('/orders/:id/status', checkPermission('create_purchases'), readOnlyForSuperAdmin, updatePurchaseOrderStatus);
+router.post('/orders/:id/finalize-with-advance', checkPermission('create_purchases'), readOnlyForSuperAdmin, finalizePOWithAdvance);
 router.delete('/orders/:id', checkPermission('delete_purchases'), readOnlyForSuperAdmin, deletePurchaseOrder);
 
 // GRN Routes

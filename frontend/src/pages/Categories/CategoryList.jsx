@@ -16,6 +16,12 @@ import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 import { invalidateProductMastersCache } from '../../components/forms/ProductForm';
 
+let cachedCategoryState = null;
+try {
+  const stored = sessionStorage.getItem('cached_category_state');
+  if (stored) cachedCategoryState = JSON.parse(stored);
+} catch (e) {}
+
 const CategoryList = () => {
   const { isDarkMode } = useAppSelector((state) => state.theme);
   
@@ -23,7 +29,7 @@ const CategoryList = () => {
   const [activeTab, setActiveTab] = useState('main');
 
   // Loading States
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedCategoryState);
   const [btnLoading, setBtnLoading] = useState(false);
 
   // Error & Toast Message
@@ -35,9 +41,9 @@ const CategoryList = () => {
   const [statusFilter, setStatusFilter] = useState('');
 
   // Data Lists
-  const [categories, setCategories] = useState([]);
-  const [subCategories, setSubCategories] = useState([]);
-  const [brands, setBrands] = useState([]);
+  const [categories, setCategories] = useState(cachedCategoryState?.categories || []);
+  const [subCategories, setSubCategories] = useState(cachedCategoryState?.subCategories || []);
+  const [brands, setBrands] = useState(cachedCategoryState?.brands || []);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -54,8 +60,8 @@ const CategoryList = () => {
   });
 
   // Load Data based on active tab
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (forceSpinner = false) => {
+    if (!cachedCategoryState || forceSpinner) setLoading(true);
     setError('');
     try {
       if (activeTab === 'main') {
@@ -314,7 +320,7 @@ const CategoryList = () => {
       )}
 
       {/* Header Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -343,7 +349,7 @@ const CategoryList = () => {
         </div>
 
         {/* NAVIGATION TABS */}
-        <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+        <div className="flex items-center gap-2 mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-slate-100 dark:border-slate-800 overflow-x-auto pb-1 scrollbar-none">
           <button
             onClick={() => { setActiveTab('main'); setSearchQuery(''); setStatusFilter(''); }}
             className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all ${
@@ -392,7 +398,7 @@ const CategoryList = () => {
       </div>
 
       {/* FILTER HUB & CONTROLS */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* Search Box */}
           <div className="sm:col-span-2 relative">

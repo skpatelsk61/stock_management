@@ -27,6 +27,9 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
       return {
         product_id: item.product_id,
         name: item.product_name,
+        measurement_value: item.measurement_value || item.weight || '',
+        unit: item.unit || 'Pcs',
+        brand: item.brand || '',
         barcode: item.barcode || '',
         purchase_price: Number(item.purchase_price || 0) > 0 ? Number(item.purchase_price) : '',
         gst: item.gst !== undefined && item.gst !== null && Number(item.gst) >= 0 ? Number(item.gst) : 0,
@@ -310,21 +313,34 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
               >
                 {/* Product Header & Stats */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-2.5">
-                  <div>
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-extrabold text-slate-900">{item.name}</span>
+                    {item.brand && (
+                      <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                        {item.brand}
+                      </span>
+                    )}
+                    {(item.measurement_value || item.unit) && (
+                      <span className="text-[11px] font-black text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-md border border-amber-300 shadow-sm flex items-center gap-1">
+                        <span>⚖️</span>
+                        <span>{item.measurement_value ? `${item.measurement_value}${item.unit && !item.measurement_value.toLowerCase().includes(item.unit.toLowerCase()) ? ` (${item.unit})` : ''}` : item.unit}</span>
+                      </span>
+                    )}
                     {item.barcode && (
-                      <span className="text-[11px] font-mono text-slate-500 ml-2 bg-slate-100 px-1.5 py-0.5 rounded">Barcode: {item.barcode}</span>
+                      <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                        Barcode: {item.barcode}
+                      </span>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
                     <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80">
-                      Ordered: {item.ordered_quantity}
+                      Ordered: {item.ordered_quantity} {item.unit || 'units'}
                     </span>
                     <span className="bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-lg border border-emerald-200/80">
-                      Previously Rec: {item.previously_received}
+                      Previously Rec: {item.previously_received} {item.unit || 'units'}
                     </span>
                     <span className="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-lg border border-indigo-200/80">
-                      Remaining PO: {remaining}
+                      Remaining PO: {remaining} {item.unit || 'units'}
                     </span>
                   </div>
                 </div>
@@ -334,7 +350,7 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                   
                   {/* Row 1: Quantities & Batch */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-start">
-                    {/* 1. Qty Received */}
+                    {/* 1. Qty Received ({item.unit || 'units'}) */}
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-700 uppercase tracking-wider block">
                         Qty Received *
@@ -530,11 +546,11 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-200/60 text-[11px] font-semibold">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-                          Net Stock Inward: <strong className="font-mono">{accepted}</strong> units
+                          Net Stock Inward: <strong className="font-mono">{accepted}</strong> {item.unit || 'units'}
                         </span>
                         {dam > 0 && (
                           <span className="text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-md border border-rose-200 font-bold">
-                            Damaged: <strong className="font-mono">{dam}</strong> units
+                            Damaged: <strong className="font-mono">{dam}</strong> {item.unit || 'units'}
                           </span>
                         )}
                         {marginP !== null && (

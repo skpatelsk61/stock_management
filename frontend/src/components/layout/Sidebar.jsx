@@ -251,8 +251,8 @@ const Sidebar = () => {
   /* ── Menu items ── */
   const menuItems = [
     { label: 'Dashboard',            path: '/dashboard',          icon: HomeIcon },
-    { label: 'Products',             path: '/dashboard/products', icon: ShoppingCartIcon },
     { label: 'Categories',           path: '/dashboard/categories', icon: TagIcon },
+    { label: 'Products',             path: '/dashboard/products', icon: ShoppingCartIcon },
     { label: 'Supplier Master',      path: '/dashboard/vendors',  icon: TruckIcon },
     { label: 'Stock Management',     path: '/dashboard/stock',    icon: CubeIcon },
     { label: 'Sales',                path: '/dashboard/sales',    icon: CurrencyDollarIcon },
@@ -272,10 +272,10 @@ const Sidebar = () => {
 
     // Purchase Department Roles
     if (user.role === 'Purchase Manager') {
-      return menuItems.filter(i => ['Dashboard', 'Products', 'Categories', 'Supplier Master', 'Stock Management', 'Staff Management', 'Reports'].includes(i.label));
+      return menuItems.filter(i => ['Dashboard', 'Categories', 'Products', 'Supplier Master', 'Stock Management', 'Staff Management', 'Reports'].includes(i.label));
     }
     if (user.role === 'Purchase Employee' || (user.role === 'Employee' && user.department === 'Purchase')) {
-      return menuItems.filter(i => ['Dashboard', 'Products', 'Categories', 'Supplier Master', 'Stock Management', 'Reports'].includes(i.label));
+      return menuItems.filter(i => ['Dashboard', 'Categories', 'Products', 'Supplier Master', 'Stock Management', 'Reports'].includes(i.label));
     }
 
     // Sales Department Roles
@@ -288,7 +288,7 @@ const Sidebar = () => {
 
     // General Operations Employee
     if (user.role === 'Employee') {
-      return menuItems.filter(i => ['Dashboard', 'Products', 'Categories', 'Supplier Master', 'Stock Management', 'Sales', 'Borrow Ledger', 'Reports'].includes(i.label));
+      return menuItems.filter(i => ['Dashboard', 'Categories', 'Products', 'Supplier Master', 'Stock Management', 'Sales', 'Borrow Ledger', 'Reports'].includes(i.label));
     }
 
     const perms = user.permissions || [];

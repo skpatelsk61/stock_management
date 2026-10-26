@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import Footer from './Footer';
@@ -33,21 +33,6 @@ const MainLayout = () => {
    * This is intentional — hover is transient, pinning causes layout shift.
    */
   const spacerWidth = isPinned ? SIDEBAR_EXPANDED_W : SIDEBAR_COLLAPSED_W;
-
-  /* Page transition variants */
-  const pageTransitionVariants = {
-    initial: { opacity: 0, y: 12 },
-    animate: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.3, ease: [0.25, 1, 0.5, 1] },
-    },
-    exit: {
-      opacity: 0,
-      y: -12,
-      transition: { duration: 0.2, ease: 'easeIn' },
-    },
-  };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gradient-to-tr from-slate-50 via-indigo-50/30 to-white dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 antialiased">
@@ -109,21 +94,18 @@ const MainLayout = () => {
           {/* Scrollable workspace */}
           <div className="flex-1 flex flex-col justify-between overflow-y-auto overflow-x-hidden min-h-0 select-text scroll-smooth">
             <main className="w-full flex-1 flex flex-col items-center">
-              <div className="w-full max-w-[1600px] flex-1 flex flex-col px-4 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6 gap-6">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={location.pathname}
-                    variants={pageTransitionVariants}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    className="w-full flex-1 flex flex-col"
-                  >
-                    <Suspense fallback={<PageContentSkeleton />}>
-                      <Outlet />
-                    </Suspense>
-                  </motion.div>
-                </AnimatePresence>
+              <div className="w-full max-w-[1600px] flex-1 flex flex-col px-3 py-3 sm:px-6 sm:py-5 md:px-8 md:py-6 gap-4 sm:gap-6">
+                <motion.div
+                  key={location.pathname}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.12 }}
+                  className="w-full flex-1 flex flex-col"
+                >
+                  <Suspense fallback={<PageContentSkeleton />}>
+                    <Outlet />
+                  </Suspense>
+                </motion.div>
               </div>
             </main>
 

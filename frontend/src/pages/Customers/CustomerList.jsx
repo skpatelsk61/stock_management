@@ -33,12 +33,18 @@ import { customersAPI } from '../../services/api';
 import API from '../../services/api'; // Direct imports for borrow features
 import { useAppSelector } from '../../store/hooks';
 
+let cachedCustomerState = null;
+try {
+  const stored = sessionStorage.getItem('cached_customer_state');
+  if (stored) cachedCustomerState = JSON.parse(stored);
+} catch (e) {}
+
 const CustomerList = () => {
   const { user } = useAppSelector((state) => state.auth);
   const isReadOnly = user?.role === 'Super Admin';
 
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [customers, setCustomers] = useState(cachedCustomerState?.customers || []);
+  const [loading, setLoading] = useState(!cachedCustomerState);
   
   // Dashboard Metrics
   const [kpis, setKpis] = useState({

@@ -84,6 +84,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
           barcode: item.barcode || '—',
           category: item.category || 'General',
           unit: item.unit || 'Pcs',
+          measurement_value: item.measurement_value || item.weight || '',
+          brand: item.brand || '',
           ordered_quantity: ordered,
           total_delivered: delivered,
           total_damaged: damaged,
@@ -138,6 +140,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
 
   const [formData, setFormData] = useState(getInitialFormData());
   const [finalizePO, setFinalizePO] = useState(true);
+  const [creditDamagedAdvance, setCreditDamagedAdvance] = useState(true);
+  const [advanceSettlementMode, setAdvanceSettlementMode] = useState('AUTO');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -253,6 +257,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
           barcode: product.barcode || '—',
           category: product.category || 'General',
           unit: product.unit || 'Pcs',
+          measurement_value: product.measurement_value || '',
+          brand: product.brand || '',
           quantity: qty,
           price: finalPrice,
           purchase_price: finalPrice,
@@ -323,7 +329,7 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
   const extraDisc = parseFloat(formData.discountAmount) || 0;
   const grandTotal = Math.max(0, subtotal - totalDisc + totalGst + transport + other - extraDisc);
 
-  // ── PO Delivery, Damage & Accepted audit metrics (when linked to PO)
+  // ── PO Delivery, Damage, Undelivered & Accepted audit metrics (when linked to PO)
   const poAuditMetrics = useMemo(() => {
     if (!purchaseOrder) return null;
     let totalOrdered = 0;
@@ -331,7 +337,9 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
     let totalDamaged = 0;
     let totalAccepted = 0;
     let totalDamagedDeduction = 0;
+    let totalUndeliveredDeduction = 0;
     let totalGrossDeliveredValue = 0;
+    let totalOrderedValue = 0;
 
     formData.items.forEach((item) => {
       const ord = Number(item.ordered_quantity ?? item.quantity ?? 0);
@@ -342,23 +350,60 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
       const gstP = Number(item.gstPercent || 0);
       const unitWithTax = price * (1 + gstP / 100);
 
+      const undel = Math.max(0, ord - del);
+
       totalOrdered += ord;
       totalDelivered += del;
       totalDamaged += dam;
       totalAccepted += acc;
       totalDamagedDeduction += dam * unitWithTax;
+      totalUndeliveredDeduction += undel * unitWithTax;
       totalGrossDeliveredValue += del * unitWithTax;
+      totalOrderedValue += ord * unitWithTax;
     });
 
+    const finalOrdered = purchaseOrder.total_ordered_quantity !== undefined && purchaseOrder.total_ordered_quantity !== null ? Number(purchaseOrder.total_ordered_quantity) : totalOrdered;
+    const finalDelivered = purchaseOrder.total_delivered_quantity !== undefined && purchaseOrder.total_delivered_quantity !== null ? Number(purchaseOrder.total_delivered_quantity) : totalDelivered;
+    const finalDamaged = purchaseOrder.total_damaged_quantity !== undefined && purchaseOrder.total_damaged_quantity !== null ? Number(purchaseOrder.total_damaged_quantity) : totalDamaged;
+    const finalAccepted = purchaseOrder.total_accepted_quantity !== undefined && purchaseOrder.total_accepted_quantity !== null ? Number(purchaseOrder.total_accepted_quantity) : totalAccepted;
+    const undeliveredUnits = Math.max(0, finalOrdered - finalDelivered);
+
     return {
-      totalOrdered: purchaseOrder.total_ordered_quantity !== undefined && purchaseOrder.total_ordered_quantity !== null ? Number(purchaseOrder.total_ordered_quantity) : totalOrdered,
-      totalDelivered: purchaseOrder.total_delivered_quantity !== undefined && purchaseOrder.total_delivered_quantity !== null ? Number(purchaseOrder.total_delivered_quantity) : totalDelivered,
-      totalDamaged: purchaseOrder.total_damaged_quantity !== undefined && purchaseOrder.total_damaged_quantity !== null ? Number(purchaseOrder.total_damaged_quantity) : totalDamaged,
-      totalAccepted: purchaseOrder.total_accepted_quantity !== undefined && purchaseOrder.total_accepted_quantity !== null ? Number(purchaseOrder.total_accepted_quantity) : totalAccepted,
-      totalDamagedDeduction: purchaseOrder.total_damaged_deduction !== undefined && purchaseOrder.total_damaged_deduction !== null ? Number(purchaseOrder.total_damaged_deduction) : Number(totalDamagedDeduction.toFixed(2)),
+      totalOrdered: finalOrdered,
+      totalDelivered: finalDelivered,
+      totalDamaged: finalDamaged,
+      totalAccepted: finalAccepted,
+      undeliveredUnits,
+      totalDamagedDeduction: Number(totalDamagedDeduction.toFixed(2)),
+      totalUndeliveredDeduction: Number(totalUndeliveredDeduction.toFixed(2)),
       totalGrossDeliveredValue: Number(totalGrossDeliveredValue.toFixed(2)),
+      totalOrderedValue: Number(totalOrderedValue.toFixed(2)),
     };
   }, [purchaseOrder, formData.items]);
+
+  // Determine active Tarika 2 settlement mode
+  const activeSettlementMode = useMemo(() => {
+    if (advanceSettlementMode !== 'AUTO') return advanceSettlementMode;
+    if ((poAuditMetrics?.undeliveredUnits || 0) > 0) return 'FULL_ORDER';
+    if ((poAuditMetrics?.totalDamaged || 0) > 0) return 'DELIVERED';
+    return 'NONE';
+  }, [advanceSettlementMode, poAuditMetrics]);
+
+  // Compute effective Advance Jama amount and unit count
+  const { effectiveAdvanceAmount, effectiveAdvanceUnits } = useMemo(() => {
+    if (!purchaseOrder || !poAuditMetrics) return { effectiveAdvanceAmount: 0, effectiveAdvanceUnits: 0 };
+    if (activeSettlementMode === 'FULL_ORDER') {
+      const amt = (poAuditMetrics.totalDamagedDeduction || 0) + (poAuditMetrics.totalUndeliveredDeduction || 0);
+      const units = (poAuditMetrics.totalDamaged || 0) + (poAuditMetrics.undeliveredUnits || 0);
+      return { effectiveAdvanceAmount: Number(amt.toFixed(2)), effectiveAdvanceUnits: units };
+    }
+    if (activeSettlementMode === 'DELIVERED') {
+      const amt = poAuditMetrics.totalDamagedDeduction || 0;
+      const units = poAuditMetrics.totalDamaged || 0;
+      return { effectiveAdvanceAmount: Number(amt.toFixed(2)), effectiveAdvanceUnits: units };
+    }
+    return { effectiveAdvanceAmount: 0, effectiveAdvanceUnits: 0 };
+  }, [purchaseOrder, poAuditMetrics, activeSettlementMode]);
 
   const handleReset = () => {
     setFormData({
@@ -387,6 +432,11 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
     setIsSubmitting(true);
     try {
       const finalPaymentStatus = formData.paymentStatus || (formData.paymentMode === 'Credit' ? 'Pending' : 'Paid');
+      const hasAdvanceSettlement = effectiveAdvanceAmount > 0;
+      const finalPaidAmount = (finalPaymentStatus === 'Paid' || formData.paymentMode !== 'Credit')
+        ? (grandTotal + effectiveAdvanceAmount)
+        : (formData.paidAmount ? Number(formData.paidAmount) : (hasAdvanceSettlement ? effectiveAdvanceAmount : 0));
+
       await onSubmit({
         ...formData,
         finalize_po: finalizePO,
@@ -394,6 +444,10 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
         subtotal,
         tax: totalGst,
         total: grandTotal,
+        credit_damaged_advance: hasAdvanceSettlement,
+        damaged_advance_amount: effectiveAdvanceAmount,
+        total_damaged_units: effectiveAdvanceUnits,
+        paid_amount: finalPaidAmount,
         deliveryStatus: 'Received',
       });
     } finally {
@@ -822,7 +876,19 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                     <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
                       <td className="px-3 py-3 text-center text-slate-400 text-[10px] font-bold">{idx + 1}</td>
                       <td className="px-4 py-3 min-w-[160px]">
-                        <p className="text-xs font-bold text-slate-900 leading-tight">{item.name}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-bold text-slate-900 leading-tight">{item.name}</p>
+                          {item.brand && (
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                              {item.brand}
+                            </span>
+                          )}
+                          {item.measurement_value && (
+                            <span className="text-[10px] font-black text-amber-800 bg-amber-50 px-2 py-0.2 rounded border border-amber-300">
+                              ⚖️ {item.measurement_value}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[9px] text-slate-400 font-mono uppercase">{item.barcode}</span>
                           <span className="text-[9px] text-slate-400">·</span>
@@ -1033,6 +1099,135 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                 )}
               </div>
 
+              {/* Tarika 2: Advance Jama & Excess Payment Settlement (PO Discrepancies) */}
+              {purchaseOrder && poAuditMetrics && (poAuditMetrics.totalDamaged > 0 || poAuditMetrics.undeliveredUnits > 0) && (
+                <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50/70 dark:from-amber-950/50 dark:to-slate-900 border-2 border-amber-300 dark:border-amber-700 rounded-2xl shadow-sm space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-2xl leading-none mt-0.5">🛡️</span>
+                      <div>
+                        <h4 className="text-xs font-black text-amber-950 dark:text-amber-200 uppercase tracking-wider flex items-center gap-1.5">
+                          <span>Tarika 2: Advance Jama Settlement (अग्रिम जमा खाता)</span>
+                          <span className="px-2 py-0.5 bg-amber-500 text-white rounded text-[9px] font-bold">Auto Rule</span>
+                        </h4>
+                        <p className="text-[11px] text-amber-900 dark:text-amber-300 mt-1 leading-relaxed font-medium">
+                          Supplier ko jo bhi excess payment hua hai, wo <strong className="font-bold">Vendor Advance Balance (जमा)</strong> me add ho jayega taaki agle bill me adjust ho sake.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Radio choices */}
+                  <div className="space-y-2 pt-1">
+                    {/* Option 1: Full Order (20 units) paid */}
+                    {poAuditMetrics.undeliveredUnits > 0 && (
+                      <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                        activeSettlementMode === 'FULL_ORDER'
+                          ? 'bg-amber-100/90 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 shadow-xs'
+                          : 'bg-white/80 dark:bg-slate-900/60 border-amber-200/70 dark:border-amber-800/60 hover:bg-amber-50/60'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="advanceSettlementRadio"
+                          value="FULL_ORDER"
+                          checked={activeSettlementMode === 'FULL_ORDER'}
+                          onChange={() => setAdvanceSettlementMode('FULL_ORDER')}
+                          className="mt-0.5 w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                        />
+                        <div className="flex-1 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-black text-slate-900 dark:text-white">
+                              Full Order ({poAuditMetrics.totalOrdered} units) Payment Done to Supplier
+                            </span>
+                            <span className="font-mono font-black text-amber-800 dark:text-amber-300 text-[11px] bg-amber-200/70 dark:bg-amber-900 px-2 py-0.5 rounded">
+                              +₹{(poAuditMetrics.totalDamagedDeduction + poAuditMetrics.totalUndeliveredDeduction).toFixed(2)} Advance Jama
+                            </span>
+                          </div>
+                          <span className="block text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                            Net Invoice: ₹{grandTotal.toFixed(2)} ({poAuditMetrics.totalAccepted} units) + Advance Jama: ₹{(poAuditMetrics.totalDamagedDeduction + poAuditMetrics.totalUndeliveredDeduction).toFixed(2)} ({poAuditMetrics.totalDamaged} damaged + {poAuditMetrics.undeliveredUnits} remaining undelivered)
+                          </span>
+                        </div>
+                      </label>
+                    )}
+
+                    {/* Option 2: Delivered Items (15 units) paid */}
+                    {poAuditMetrics.totalDamaged > 0 && (
+                      <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                        activeSettlementMode === 'DELIVERED'
+                          ? 'bg-amber-100/90 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 shadow-xs'
+                          : 'bg-white/80 dark:bg-slate-900/60 border-amber-200/70 dark:border-amber-800/60 hover:bg-amber-50/60'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="advanceSettlementRadio"
+                          value="DELIVERED"
+                          checked={activeSettlementMode === 'DELIVERED'}
+                          onChange={() => setAdvanceSettlementMode('DELIVERED')}
+                          className="mt-0.5 w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                        />
+                        <div className="flex-1 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-black text-slate-900 dark:text-white">
+                              Delivered Items ({poAuditMetrics.totalDelivered} units) Payment Done to Supplier
+                            </span>
+                            <span className="font-mono font-black text-amber-800 dark:text-amber-300 text-[11px] bg-amber-200/70 dark:bg-amber-900 px-2 py-0.5 rounded">
+                              +₹{poAuditMetrics.totalDamagedDeduction.toFixed(2)} Advance Jama
+                            </span>
+                          </div>
+                          <span className="block text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                            Net Invoice: ₹{grandTotal.toFixed(2)} ({poAuditMetrics.totalAccepted} units) + Advance Jama: ₹{poAuditMetrics.totalDamagedDeduction.toFixed(2)} ({poAuditMetrics.totalDamaged} damaged units)
+                          </span>
+                        </div>
+                      </label>
+                    )}
+
+                    {/* Option 3: Only Accepted units paid (Exact bill, 0 advance) */}
+                    <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      activeSettlementMode === 'NONE'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700 shadow-xs'
+                        : 'bg-white/80 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="advanceSettlementRadio"
+                        value="NONE"
+                        checked={activeSettlementMode === 'NONE'}
+                        onChange={() => setAdvanceSettlementMode('NONE')}
+                        className="mt-0.5 w-4 h-4 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                      <div className="flex-1 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                            Only Accepted Items ({poAuditMetrics.totalAccepted} units) Paid / No Advance
+                          </span>
+                          <span className="font-mono font-bold text-slate-500 text-[11px]">
+                            Exact ₹{grandTotal.toFixed(2)}
+                          </span>
+                        </div>
+                        <span className="block text-[10px] text-slate-500 font-normal mt-0.5">
+                          Keval sahi stock ka paisa diya gaya hai (koi advance jama nahi hoga).
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Summary row */}
+                  {effectiveAdvanceAmount > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-amber-200 dark:border-amber-800 text-[11px] font-bold">
+                      <span className="text-slate-600 dark:text-slate-400">
+                        Net Stock Invoice: <span className="text-slate-900 dark:text-white font-mono font-bold">₹{grandTotal.toFixed(2)}</span>
+                      </span>
+                      <span className="text-amber-800 dark:text-amber-300">
+                        + Tarika 2 Advance Jama: <span className="font-mono font-black text-amber-700 dark:text-amber-400">₹{effectiveAdvanceAmount.toFixed(2)}</span> ({effectiveAdvanceUnits} units)
+                      </span>
+                      <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 font-bold">
+                        Total Vendor Payment: <span className="font-mono font-black">₹{(grandTotal + effectiveAdvanceAmount).toFixed(2)}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Info strip */}
               <div className="flex items-start gap-2 bg-slate-50 border border-slate-100 rounded-xl p-3">
                 <span className="text-base leading-none mt-0.5">ℹ️</span>
@@ -1068,6 +1263,16 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                       {poAuditMetrics.totalDamagedDeduction > 0 ? `-₹${poAuditMetrics.totalDamagedDeduction.toFixed(2)}` : '₹0.00'}
                     </span>
                   </div>
+                  {effectiveAdvanceAmount > 0 && (
+                    <div className="flex justify-between items-center py-2.5 border-b border-slate-700/40 bg-amber-950/40 px-2 -mx-2 rounded-lg">
+                      <span className="text-xs text-amber-300 font-bold flex items-center gap-1.5">
+                        <span>🛡️</span> Tarika 2 Advance Jama ({effectiveAdvanceUnits} units)
+                      </span>
+                      <span className="font-mono text-sm text-amber-400 font-black">
+                        +₹{effectiveAdvanceAmount.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center py-2.5 border-b border-slate-700/40">
                     <span className="text-xs text-slate-300 font-medium">Net Accepted Subtotal ({poAuditMetrics.totalAccepted} units)</span>
                     <span className="font-mono text-sm text-white font-bold">₹{subtotal.toFixed(2)}</span>

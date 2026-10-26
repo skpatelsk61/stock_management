@@ -913,11 +913,12 @@ export const createVendorReturn = async (req, res, next) => {
       const totPaidSync = Number(paySumSync[0].total || 0);
 
       const diffSync = (netPSync + openBSync) - totPaidSync;
-      const newOut = Math.max(0, diffSync);
+      const newOut = diffSync > 0.005 ? Number(diffSync.toFixed(2)) : 0;
+      const newAdv = diffSync < -0.005 ? Number(Math.abs(diffSync).toFixed(2)) : 0;
 
       await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-        [grossPSync, totPaidSync, newOut, Number(vendor_id)]
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+        [grossPSync, totPaidSync, newOut, newAdv, Number(vendor_id)]
       );
     }
     log('createVendorReturn', 'Vendor balance updated');
@@ -1076,11 +1077,12 @@ export const deleteVendorReturn = async (req, res, next) => {
       const totPaidSync = Number(paySumSync[0].total || 0);
 
       const diffSync = (netPSync + openBSync) - totPaidSync;
-      const newOut = Math.max(0, diffSync);
+      const newOut = diffSync > 0.005 ? Number(diffSync.toFixed(2)) : 0;
+      const newAdv = diffSync < -0.005 ? Number(Math.abs(diffSync).toFixed(2)) : 0;
 
       await connection.query(
-        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-        [grossPSync, totPaidSync, newOut, Number(vendorId)]
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ?, advance_balance = ? WHERE id = ?',
+        [grossPSync, totPaidSync, newOut, newAdv, Number(vendorId)]
       );
     }
 
