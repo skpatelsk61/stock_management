@@ -1424,11 +1424,18 @@ export const createPurchase = async (req, res, next) => {
     const credit_damaged_advance = Boolean(req.body.credit_damaged_advance);
     const damaged_advance_amount = Number(req.body.damaged_advance_amount || 0);
     const total_damaged_units = Number(req.body.total_damaged_units || 0);
+    const is_prepaid_order = Boolean(req.body.is_prepaid_order || req.body.full_order_paid);
 
     let actualPaymentStatus = payment_status || 'Pending';
     let initialPaid = Number(req.body.paid_amount || 0);
 
-    if (actualPaymentStatus === 'Paid' && initialPaid === 0) {
+    // If pre-paid order or damaged advance settlement is active with Paid status:
+    if (is_prepaid_order || (credit_damaged_advance && (actualPaymentStatus === 'Paid' || req.body.payment_method !== 'Credit'))) {
+      actualPaymentStatus = 'Paid';
+      if (initialPaid <= 0 || initialPaid === damaged_advance_amount || initialPaid === invoiceTotal) {
+        initialPaid = invoiceTotal + (credit_damaged_advance ? damaged_advance_amount : 0);
+      }
+    } else if (actualPaymentStatus === 'Paid' && initialPaid === 0) {
       initialPaid = invoiceTotal + (credit_damaged_advance ? damaged_advance_amount : 0);
     } else if (actualPaymentStatus === 'Partial' && initialPaid === 0) {
       initialPaid = invoiceTotal / 2;
@@ -1616,14 +1623,18 @@ export const createPurchase = async (req, res, next) => {
 
     // Auto-sync purchase order status if linked to a purchase order
     if (purchase_order_id) {
-      const [updatedPOItems] = await connection.query(
-        'SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
-        [purchase_order_id]
-      );
-      const allReceived = updatedPOItems.length > 0 && updatedPOItems.every(it => Number(it.received_quantity || 0) >= Number(it.quantity || 0));
-      const anyReceived = updatedPOItems.some(it => Number(it.received_quantity || 0) > 0);
-      const autoStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
-      await connection.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [autoStatus, purchase_order_id]);
+      if (req.body.finalize_po) {
+        await connection.query('UPDATE purchase_orders SET status = "Completed" WHERE id = ?', [purchase_order_id]);
+      } else {
+        const [updatedPOItems] = await connection.query(
+          'SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
+          [purchase_order_id]
+        );
+        const allReceived = updatedPOItems.length > 0 && updatedPOItems.every(it => Number(it.received_quantity || 0) >= Number(it.quantity || 0));
+        const anyReceived = updatedPOItems.some(it => Number(it.received_quantity || 0) > 0);
+        const autoStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
+        await connection.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [autoStatus, purchase_order_id]);
+      }
     }
 
     // Fetch current vendor totals & check existing advance balance BEFORE this purchase
@@ -2016,16 +2027,33 @@ export const getPurchaseOrderById = async (req, res, next) => {
       SELECT poi.*, 
              pr.name as product_name, pr.unit, pr.barcode, cat.name as category,
              COALESCE(b.name, pr.brand) as brand, pr.measurement_value,
+             pr.purchase_price as product_purchase_price,
+             pr.mrp as product_mrp,
+             pr.selling_price as product_selling_price,
+             pr.gst as product_gst,
              COALESCE(
                NULLIF(poi.purchase_price, 0),
-               (SELECT pi.purchase_price FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id ORDER BY pi.id DESC LIMIT 1),
+               (SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = poi.product_id AND pb.purchase_price > 0 ORDER BY pb.id DESC LIMIT 1),
+               NULLIF(pr.purchase_price, 0),
                0
              ) as purchase_price,
              COALESCE(
                NULLIF(poi.gst, 0),
-               (SELECT pi.gst FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id ORDER BY pi.id DESC LIMIT 1),
+               (SELECT pi.gst FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE pi.product_id = poi.product_id ORDER BY pi.id DESC LIMIT 1),
+               pr.gst,
                0
              ) as gst,
+             COALESCE(
+               NULLIF(poi.mrp, 0),
+               (SELECT pb.mrp FROM purchase_batches pb WHERE pb.product_id = poi.product_id AND pb.mrp > 0 ORDER BY pb.id DESC LIMIT 1),
+               NULLIF(pr.mrp, 0),
+               0
+             ) as mrp,
+             COALESCE(
+               (SELECT pb.selling_price FROM purchase_batches pb WHERE pb.product_id = poi.product_id AND pb.selling_price > 0 ORDER BY pb.id DESC LIMIT 1),
+               NULLIF(pr.selling_price, 0),
+               0
+             ) as selling_price,
              COALESCE(
                NULLIF(poi.total, 0),
                (SELECT SUM(pi.total) FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.purchase_order_id = poi.purchase_order_id AND pi.product_id = poi.product_id AND p.payment_status != 'Void'),
@@ -2087,6 +2115,8 @@ export const getPurchaseOrderById = async (req, res, next) => {
       it.net_accepted = acc;
       it.purchase_price = price;
       it.gst = gstP;
+      it.mrp = Number(it.mrp || 0) > 0 ? Number(it.mrp) : (Number(it.product_mrp || 0) > 0 ? Number(it.product_mrp) : 0);
+      it.selling_price = Number(it.selling_price || 0) > 0 ? Number(it.selling_price) : (Number(it.product_selling_price || 0) > 0 ? Number(it.product_selling_price) : 0);
 
       sumOrdered += ord;
       sumDelivered += del;
