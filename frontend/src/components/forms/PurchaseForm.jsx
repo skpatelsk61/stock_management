@@ -109,8 +109,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
         purchaseDate: purchaseOrder.date ? new Date(purchaseOrder.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         dueDate: purchaseOrder.expected_delivery_date ? new Date(purchaseOrder.expected_delivery_date).toISOString().split('T')[0] : '',
         items,
-        paymentMode: 'Credit',
-        paymentStatus: 'Pending',
+        paymentMode: (Number(purchaseOrder.total_damaged_quantity || 0) > 0 || (Number(purchaseOrder.total_ordered_quantity || 0) - Number(purchaseOrder.total_delivered_quantity || 0)) > 0) ? 'Cash' : 'Credit',
+        paymentStatus: (Number(purchaseOrder.total_damaged_quantity || 0) > 0 || (Number(purchaseOrder.total_ordered_quantity || 0) - Number(purchaseOrder.total_delivered_quantity || 0)) > 0) ? 'Paid' : 'Pending',
         transportCharge: '0',
         otherCharges: '0',
         discountAmount: String(purchaseOrder.discount || 0),
@@ -431,15 +431,24 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
     if (!validate()) return;
     setIsSubmitting(true);
     try {
-      const finalPaymentStatus = formData.paymentStatus || (formData.paymentMode === 'Credit' ? 'Pending' : 'Paid');
+      const isFullOrderPaidOrSettled = Boolean(purchaseOrder && (activeSettlementMode === 'FULL_ORDER' || activeSettlementMode === 'DELIVERED'));
+      const finalPaymentStatus = (isFullOrderPaidOrSettled || formData.paymentMode !== 'Credit')
+        ? 'Paid'
+        : (formData.paymentStatus || 'Pending');
+
       const hasAdvanceSettlement = effectiveAdvanceAmount > 0;
-      const finalPaidAmount = (finalPaymentStatus === 'Paid' || formData.paymentMode !== 'Credit')
+      const finalPaidAmount = (finalPaymentStatus === 'Paid' || isFullOrderPaidOrSettled || formData.paymentMode !== 'Credit')
         ? (grandTotal + effectiveAdvanceAmount)
         : (formData.paidAmount ? Number(formData.paidAmount) : (hasAdvanceSettlement ? effectiveAdvanceAmount : 0));
+
+      const finalPaymentMode = isFullOrderPaidOrSettled && formData.paymentMode === 'Credit' ? 'Cash' : formData.paymentMode;
 
       await onSubmit({
         ...formData,
         finalize_po: finalizePO,
+        is_prepaid_order: isFullOrderPaidOrSettled,
+        full_order_paid: isFullOrderPaidOrSettled,
+        paymentMode: finalPaymentMode,
         paymentStatus: finalPaymentStatus,
         subtotal,
         tax: totalGst,

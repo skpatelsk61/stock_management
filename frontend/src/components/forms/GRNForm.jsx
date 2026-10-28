@@ -14,39 +14,69 @@ import {
 } from '@heroicons/react/24/outline';
 import { purchasesAPI } from '../../services/api';
 
+const buildInitialItems = (items = []) => {
+  return (items || []).map((item) => {
+    const ord = Number(item.quantity || 0);
+    const prevDel = Number(item.total_delivered !== undefined && item.total_delivered !== null ? item.total_delivered : (item.delivered_quantity ?? item.received_quantity ?? 0));
+    const prevAcc = Number(item.received_quantity || 0);
+    const remaining = Math.max(0, ord - prevDel);
+
+    const resolvedPrice = Number(item.purchase_price || 0) > 0 
+      ? Number(item.purchase_price) 
+      : (Number(item.product_purchase_price || item.unit_price || item.price || 0) > 0 ? Number(item.product_purchase_price || item.unit_price || item.price) : '');
+
+    const resolvedGst = item.gst !== undefined && item.gst !== null && Number(item.gst) >= 0 
+      ? Number(item.gst) 
+      : (Number(item.product_gst || 0) >= 0 ? Number(item.product_gst) : 0);
+
+    const resolvedMrp = Number(item.mrp || 0) > 0 
+      ? Number(item.mrp) 
+      : (Number(item.product_mrp || item.max_retail_price || item.maxRetailPrice || 0) > 0 ? Number(item.product_mrp || item.max_retail_price || item.maxRetailPrice) : '');
+
+    const resolvedSellingPrice = Number(item.selling_price || 0) > 0 
+      ? Number(item.selling_price) 
+      : (Number(item.product_selling_price || item.sellingPrice || 0) > 0 ? Number(item.product_selling_price || item.sellingPrice) : '');
+
+    return {
+      product_id: item.product_id,
+      name: item.product_name,
+      measurement_value: item.measurement_value || item.weight || '',
+      unit: item.unit || 'Pcs',
+      brand: item.brand || '',
+      barcode: item.barcode || '',
+      purchase_price: resolvedPrice,
+      gst: resolvedGst,
+      ordered_quantity: ord,
+      previously_delivered: prevDel,
+      previously_received: prevAcc,
+      quantity_received: remaining > 0 ? remaining : '',
+      quantity_damaged: '',
+      quantity_rejected: '',
+      quantity_missing: '',
+      batch_number: '',
+      mrp: resolvedMrp,
+      selling_price: resolvedSellingPrice,
+      expiry_date: '',
+    };
+  });
+};
+
 const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     notes: '',
     auto_create_invoice: true,
-    items: purchaseOrder.items.map((item) => {
-      const ord = Number(item.quantity || 0);
-      const prevDel = Number(item.total_delivered !== undefined && item.total_delivered !== null ? item.total_delivered : (item.delivered_quantity ?? item.received_quantity ?? 0));
-      const prevAcc = Number(item.received_quantity || 0);
-      const remaining = Math.max(0, ord - prevDel);
-      return {
-        product_id: item.product_id,
-        name: item.product_name,
-        measurement_value: item.measurement_value || item.weight || '',
-        unit: item.unit || 'Pcs',
-        brand: item.brand || '',
-        barcode: item.barcode || '',
-        purchase_price: Number(item.purchase_price || 0) > 0 ? Number(item.purchase_price) : '',
-        gst: item.gst !== undefined && item.gst !== null && Number(item.gst) >= 0 ? Number(item.gst) : 0,
-        ordered_quantity: ord,
-        previously_delivered: prevDel,
-        previously_received: prevAcc,
-        quantity_received: remaining > 0 ? remaining : '',
-        quantity_damaged: '',
-        quantity_rejected: '',
-        quantity_missing: '',
-        batch_number: '',
-        mrp: item.mrp || item.max_retail_price || '',
-        selling_price: item.selling_price || item.sellingPrice || '',
-        expiry_date: '',
-      };
-    }),
+    items: buildInitialItems(purchaseOrder?.items || []),
   });
+
+  useEffect(() => {
+    if (purchaseOrder?.items && purchaseOrder.items.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        items: buildInitialItems(purchaseOrder.items),
+      }));
+    }
+  }, [purchaseOrder]);
 
   // Dynamically calculate whether 100% full stock has arrived or if items are missing/short
   const deliveryStatusInfo = useMemo(() => {
