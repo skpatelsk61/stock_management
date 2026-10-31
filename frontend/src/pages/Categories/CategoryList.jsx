@@ -12,6 +12,7 @@ import {
   CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import StatusBadge from '../../components/common/StatusBadge';
+import CustomSelect from '../../components/common/CustomSelect';
 import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 import { invalidateProductMastersCache } from '../../components/forms/ProductForm';
@@ -413,17 +414,19 @@ const CategoryList = () => {
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-[170px]">
             <FunnelIcon className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
+            <CustomSelect
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Statuses</option>
-              <option value="Active">Active Only</option>
-              <option value="Inactive">Inactive Only</option>
-            </select>
+              onChange={setStatusFilter}
+              color="blue"
+              className="flex-1"
+              options={[
+                { value: '', label: 'All Statuses' },
+                { value: 'Active', label: 'Active Only' },
+                { value: 'Inactive', label: 'Inactive Only' }
+              ]}
+            />
           </div>
         </div>
 
@@ -573,17 +576,19 @@ const CategoryList = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                     Parent Category <span className="text-rose-500">*</span>
                   </label>
-                  <select
-                    required
+                  <CustomSelect
                     value={formData.category_id}
-                    onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="">Select Active Parent Category</option>
-                    {categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setFormData(prev => ({ ...prev, category_id: val }))}
+                    color="blue"
+                    placeholder="Select Active Parent Category"
+                    options={[
+                      { value: '', label: 'Select Active Parent Category' },
+                      ...categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => ({
+                        value: c.id,
+                        label: c.name
+                      }))
+                    ]}
+                  />
                 </div>
               )}
 
@@ -594,66 +599,60 @@ const CategoryList = () => {
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                       Main Category <span className="text-rose-500">*</span>
                     </label>
-                    <select
-                      required
+                    <CustomSelect
                       value={formData.category_id}
-                      onChange={(e) => {
-                        const newCatId = e.target.value;
+                      onChange={(newCatId) => {
                         const matchingSubs = subCategories.filter(s => 
                           String(s.category_id) === String(newCatId) && 
                           (s.status === 'Active' || String(s.id) === String(formData.sub_category_id))
                         );
-                        // Auto-select first matching subcategory if current subcategory does not belong to new category
                         const isCurrentValid = matchingSubs.some(s => String(s.id) === String(formData.sub_category_id));
                         const nextSubId = isCurrentValid ? formData.sub_category_id : (matchingSubs.length > 0 ? matchingSubs[0].id : '');
 
-                        setFormData({
-                          ...formData,
+                        setFormData(prev => ({
+                          ...prev,
                           category_id: newCatId,
                           sub_category_id: nextSubId
-                        });
+                        }));
                       }}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                    >
-                      <option value="">Select Main Category</option>
-                      {categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      color="blue"
+                      placeholder="Select Main Category"
+                      options={[
+                        { value: '', label: 'Select Main Category' },
+                        ...categories.filter(c => c.status === 'Active' || String(c.id) === String(formData.category_id)).map(c => ({
+                          value: c.id,
+                          label: c.name
+                        }))
+                      ]}
+                    />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                       Sub Category <span className="text-rose-500">*</span>
                     </label>
-                    <select
-                      required
-                      disabled={!formData.category_id}
+                    <CustomSelect
                       value={formData.sub_category_id}
-                      onChange={(e) => {
-                        const chosenSubId = e.target.value;
+                      onChange={(chosenSubId) => {
                         const parentSub = subCategories.find(s => String(s.id) === String(chosenSubId));
-                        setFormData({
-                          ...formData,
+                        setFormData(prev => ({
+                          ...prev,
                           sub_category_id: chosenSubId,
-                          category_id: parentSub?.category_id || formData.category_id
-                        });
+                          category_id: parentSub?.category_id || prev.category_id
+                        }));
                       }}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
-                    >
-                      {!formData.category_id ? (
-                        <option value="">Select Main Category First</option>
-                      ) : subCategories.filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id))).length === 0 ? (
-                        <option value="" disabled>No Sub Categories Available for this Category</option>
-                      ) : (
-                        <option value="">Select Sub Category</option>
-                      )}
-                      {subCategories
-                        .filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id)))
-                        .map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
+                      color="blue"
+                      placeholder={!formData.category_id ? "Select Main Category First" : "Select Sub Category"}
+                      options={[
+                        { value: '', label: !formData.category_id ? 'Select Main Category First' : 'Select Sub Category' },
+                        ...subCategories
+                          .filter(s => String(s.category_id) === String(formData.category_id) && (s.status === 'Active' || String(s.id) === String(formData.sub_category_id)))
+                          .map(s => ({
+                            value: s.id,
+                            label: s.name
+                          }))
+                      ]}
+                    />
                   </div>
                 </>
               )}
@@ -681,14 +680,15 @@ const CategoryList = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                     Status
                   </label>
-                  <select
+                  <CustomSelect
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                    onChange={(val) => setFormData(prev => ({ ...prev, status: val }))}
+                    color="blue"
+                    options={[
+                      { value: 'Active', label: 'Active' },
+                      { value: 'Inactive', label: 'Inactive' }
+                    ]}
+                  />
                 </div>
               )}
 

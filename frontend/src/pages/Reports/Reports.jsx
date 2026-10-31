@@ -26,6 +26,8 @@ import {
 } from 'recharts';
 import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import API, { reportsAPI, stockAPI, productsAPI, vendorsAPI, customersAPI, usersAPI, categoriesAPI, salesAPI, purchasesAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 
@@ -174,17 +176,19 @@ const Reports = () => {
       const dates = getComputedDates();
       const params = {
         scope: analyticsScope,
-        productId: selectedProduct,
-        categoryId: selectedCategory,
-        brand: selectedBrand,
-        brandId: selectedBrand,
-        vendorId: selectedVendor,
-        customerId: selectedCustomer,
-        employeeId: selectedEmployee,
-        timeScale,
-        startDate: dates.start,
-        endDate: dates.end
+        timeScale
       };
+      if (selectedProduct && analyticsScope === 'product') params.productId = selectedProduct;
+      if (selectedCategory && selectedCategory !== 'all') params.categoryId = selectedCategory;
+      if (selectedBrand && selectedBrand !== 'all') {
+        params.brand = selectedBrand;
+        params.brandId = selectedBrand;
+      }
+      if (selectedVendor && selectedVendor !== 'all') params.vendorId = selectedVendor;
+      if (selectedCustomer && selectedCustomer !== 'all') params.customerId = selectedCustomer;
+      if (selectedEmployee && selectedEmployee !== 'all') params.employeeId = selectedEmployee;
+      if (dates.start) params.startDate = dates.start;
+      if (dates.end) params.endDate = dates.end;
 
       if (comparePeriod && dates.compStart && dates.compEnd) {
         params.compareStartDate = dates.compStart;
@@ -211,15 +215,14 @@ const Reports = () => {
     setLoading(true);
     try {
       const dates = getComputedDates();
-      const params = {
-        startDate: dates.start,
-        endDate: dates.end,
-        categoryId: selectedCategory,
-        brandId: selectedBrand,
-        vendorId: selectedVendor,
-        customerId: selectedCustomer,
-        employeeId: selectedEmployee
-      };
+      const params = {};
+      if (dates.start) params.startDate = dates.start;
+      if (dates.end) params.endDate = dates.end;
+      if (selectedCategory && selectedCategory !== 'all') params.categoryId = selectedCategory;
+      if (selectedBrand && selectedBrand !== 'all') params.brandId = selectedBrand;
+      if (selectedVendor && selectedVendor !== 'all') params.vendorId = selectedVendor;
+      if (selectedCustomer && selectedCustomer !== 'all') params.customerId = selectedCustomer;
+      if (selectedEmployee && selectedEmployee !== 'all') params.employeeId = selectedEmployee;
 
       if (activeTab === 'inventory') {
         const res = await reportsAPI.getInventoryReport(params);
@@ -615,34 +618,34 @@ const Reports = () => {
   return (
     <div className="space-y-6 select-none font-sans print:p-0">
       
-      {/* HEADER SECTION */}
-      <div className="flex items-center justify-between bg-white dark:bg-slate-900 print:hidden p-5 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm">
+      {/* HEADER SECTION (Fully Responsive) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 print:hidden p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm">
         <div>
-          <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
             📊 Business Reports & Analytics
           </h1>
           <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">Valuation ledger, sales accounting, tax sheets, and interactive dashboards</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <button
             onClick={handlePrintPDF}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs bg-white dark:bg-slate-850"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs bg-white dark:bg-slate-850 cursor-pointer"
           >
             🖨️ PDF Report
           </button>
           <button
             onClick={handleExportCSV}
             disabled={loading || (activeTab !== 'analytics' && dataList.length === 0)}
-            className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs disabled:opacity-50 bg-white dark:bg-slate-850"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 py-2 sm:py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs disabled:opacity-50 bg-white dark:bg-slate-850 cursor-pointer"
           >
             <DocumentArrowDownIcon className="w-4 h-4" />
             Export CSV
           </button>
           <button
             onClick={fetchReportData}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs bg-white dark:bg-slate-850"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-bold text-xs shadow-xs bg-white dark:bg-slate-850 cursor-pointer"
           >
-            <ArrowPathIcon className="w-4 h-4" />
+            <ArrowPathIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
@@ -654,14 +657,14 @@ const Reports = () => {
         </div>
       )}
 
-      {/* TABS BAR */}
-      <div className="border-b border-slate-200 dark:border-slate-800 print:hidden">
-        <nav className="flex gap-4">
+      {/* TABS BAR (Fully Responsive with smooth horizontal scrollbar on mobile) */}
+      <div className="border-b border-slate-200 dark:border-slate-800 print:hidden overflow-x-auto scrollbar-thin">
+        <nav className="flex gap-2 sm:gap-6 min-w-max pb-0.5 px-0.5">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`py-3 px-1 border-b-2 font-bold text-xs transition-all ${
+              className={`py-3 px-2 sm:px-1 border-b-2 font-bold text-xs whitespace-nowrap transition-all cursor-pointer ${
                 activeTab === tab.id
                   ? 'border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-400 font-black'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700'
@@ -689,90 +692,92 @@ const Reports = () => {
               {/* Analytics Scope */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Scope</label>
-                <select
+                <CustomSelect
                   value={analyticsScope}
-                  onChange={(e) => setAnalyticsScope(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="overall">Overall Performance</option>
-                  <option value="product">Specific Product Performance</option>
-                </select>
+                  onChange={setAnalyticsScope}
+                  color="blue"
+                  options={[
+                    { value: 'overall', label: 'Overall Performance' },
+                    { value: 'product', label: 'Individual Product Breakdown' }
+                  ]}
+                />
               </div>
 
               {/* Product Selector */}
               {analyticsScope === 'product' && (
                 <div>
                   <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Choose Product</label>
-                  <select
+                  <CustomSelect
                     value={selectedProduct}
-                    onChange={(e) => setSelectedProduct(e.target.value)}
-                    className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                  >
-                    {productsList.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+                    onChange={setSelectedProduct}
+                    color="blue"
+                    options={productsList.map(p => ({
+                      value: p.id,
+                      label: `${p.name} (${p.category || 'General'})`
+                    }))}
+                  />
                 </div>
               )}
 
               {/* Date Preset */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Date Preset</label>
-                <select
+                <CustomSelect
                   value={datePreset}
-                  onChange={(e) => setDatePreset(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="today">Today</option>
-                  <option value="7days">Last 7 Days</option>
-                  <option value="30days">Last 30 Days</option>
-                  <option value="year">This Year</option>
-                  <option value="custom">Custom Date Range</option>
-                </select>
+                  onChange={setDatePreset}
+                  color="blue"
+                  options={[
+                    { value: 'today', label: 'Today' },
+                    { value: '7days', label: 'Last 7 Days' },
+                    { value: '30days', label: 'Last 30 Days' },
+                    { value: 'year', label: 'This Year' },
+                    { value: 'all', label: 'All Time' },
+                    { value: 'custom', label: 'Custom Date Range' }
+                  ]}
+                />
               </div>
 
               {/* Time scale */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Time Scale</label>
-                <select
+                <CustomSelect
                   value={timeScale}
-                  onChange={(e) => setTimeScale(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="daily">Daily View</option>
-                  <option value="monthly">Monthly View</option>
-                  <option value="yearly">Yearly View</option>
-                </select>
+                  onChange={setTimeScale}
+                  color="blue"
+                  options={[
+                    { value: 'daily', label: 'Daily View' },
+                    { value: 'weekly', label: 'Weekly View' },
+                    { value: 'monthly', label: 'Monthly View' }
+                  ]}
+                />
               </div>
 
               {/* Category Filter */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Category</label>
-                <select
+                <CustomSelect
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="">All Categories</option>
-                  {categoriesList.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedCategory}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Categories' },
+                    ...categoriesList.map(c => ({ value: c.id, label: c.name }))
+                  ]}
+                />
               </div>
 
               {/* Brand Filter */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Brand</label>
-                <select
+                <CustomSelect
                   value={selectedBrand}
-                  onChange={(e) => setSelectedBrand(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="">All Brands</option>
-                  {brandsList.map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedBrand}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Brands' },
+                    ...brandsList.map(b => ({ value: typeof b === 'object' ? (b.id || b.name) : b, label: typeof b === 'object' ? b.name : b }))
+                  ]}
+                />
               </div>
             </div>
 
@@ -781,46 +786,43 @@ const Reports = () => {
               {/* Supplier Filter */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Supplier / Vendor</label>
-                <select
+                <CustomSelect
                   value={selectedVendor}
-                  onChange={(e) => setSelectedVendor(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="">All Suppliers</option>
-                  {vendorsList.map(v => (
-                    <option key={v.id} value={v.id}>{v.company_name || v.name}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedVendor}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Suppliers' },
+                    ...vendorsList.map(v => ({ value: v.id, label: v.name }))
+                  ]}
+                />
               </div>
 
               {/* Customer Filter */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Customer Profile</label>
-                <select
+                <CustomSelect
                   value={selectedCustomer}
-                  onChange={(e) => setSelectedCustomer(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="">All Customers</option>
-                  {customersList.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedCustomer}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Customers' },
+                    ...customersList.map(c => ({ value: c.id, label: `${c.name} (${c.phone})` }))
+                  ]}
+                />
               </div>
 
               {/* Operator/Cashier Filter */}
               <div>
                 <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Cashier / Staff</label>
-                <select
+                <CustomSelect
                   value={selectedEmployee}
-                  onChange={(e) => setSelectedEmployee(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <option value="">All Operators</option>
-                  {employeesList.map(e => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedEmployee}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Operators' },
+                    ...employeesList.map(e => ({ value: e.id, label: e.name }))
+                  ]}
+                />
               </div>
 
               {/* Comparison Checkbox */}
@@ -840,23 +842,23 @@ const Reports = () => {
 
             {/* Custom Dates Inputs */}
             {datePreset === 'custom' && (
-              <div className="flex items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="w-full sm:w-auto">
                   <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">From Date</label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="px-3 py-1 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
+                    onChange={setStartDate}
+                    placeholder="dd-mm-yyyy"
+                    color="blue"
                   />
                 </div>
-                <div>
+                <div className="w-full sm:w-auto">
                   <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">To Date</label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="px-3 py-1 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-950 dark:text-slate-200"
+                    onChange={setEndDate}
+                    placeholder="dd-mm-yyyy"
+                    color="blue"
                   />
                 </div>
               </div>
@@ -1510,54 +1512,55 @@ const Reports = () => {
         </div>
       ) : (
         /* TABLE REPORT VIEW */
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft space-y-6">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-5 md:p-6 shadow-sm space-y-4 sm:space-y-5 overflow-hidden">
+          {/* 1. PURCHASES & EXPENSES FILTER & SUMMARY */}
           {activeTab === 'purchase' && (
-            <div className="space-y-4 mb-6">
+            <div className="space-y-4 mb-2">
               {/* Executive Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+              <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Net Purchases Total</span>
-                  <span className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">After returns</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Subtotal (Excl. Tax)</span>
-                  <span className="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-slate-800 dark:text-slate-100 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.grossSubtotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">Taxable value</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Total Tax (GST)</span>
-                  <span className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-amber-600 dark:text-amber-400 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.totalGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">Input tax credit</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Total Discounts</span>
-                  <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.totalDiscount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">Supplier discounts</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Supplier Outstanding</span>
-                  <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-rose-600 dark:text-rose-400 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.supplierOutstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">Unpaid supplier due</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shadow-xs">
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Purchase Expenses</span>
-                  <span className="text-base sm:text-lg font-black text-blue-600 dark:text-blue-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-blue-600 dark:text-blue-400 font-mono mt-1 block truncate">
                     ₹{Number(purchaseSummary.totalExpenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium">Net expenditure</span>
@@ -1565,53 +1568,57 @@ const Reports = () => {
               </div>
 
               {/* Purchase Filter & Stats Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Filters:</span>
-                  <select
-                    value={datePreset}
-                    onChange={(e) => setDatePreset(e.target.value)}
-                    className="px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
-                  >
-                    <option value="today">Today</option>
-                    <option value="7days">Last 7 Days</option>
-                    <option value="30days">Last 30 Days</option>
-                    <option value="year">This Year</option>
-                    <option value="all">All Time</option>
-                    <option value="custom">Custom Date Range</option>
-                  </select>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs w-full lg:w-auto">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase shrink-0">Filters:</span>
+                  <div className="w-full sm:w-auto min-w-[130px]">
+                    <CustomSelect
+                      value={datePreset}
+                      onChange={setDatePreset}
+                      color="blue"
+                      options={[
+                        { value: 'today', label: 'Today' },
+                        { value: '7days', label: 'Last 7 Days' },
+                        { value: '30days', label: 'Last 30 Days' },
+                        { value: 'year', label: 'This Year' },
+                        { value: 'all', label: 'All Time' },
+                        { value: 'custom', label: 'Custom Date Range' }
+                      ]}
+                    />
+                  </div>
 
                   {datePreset === 'custom' && (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="date"
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 w-full sm:w-auto">
+                      <CustomDatePicker
                         value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                        onChange={setStartDate}
+                        placeholder="dd-mm-yyyy"
+                        color="blue"
                       />
-                      <span className="text-slate-400">to</span>
-                      <input
-                        type="date"
+                      <span className="text-slate-400 text-center text-xs">to</span>
+                      <CustomDatePicker
                         value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="px-2 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                        onChange={setEndDate}
+                        placeholder="dd-mm-yyyy"
+                        color="blue"
                       />
                     </div>
                   )}
 
-                  <select
-                    value={selectedVendor}
-                    onChange={(e) => setSelectedVendor(e.target.value)}
-                    className="px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg font-medium bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
-                  >
-                    <option value="">All Suppliers</option>
-                    {vendorsList.map(v => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
-                  </select>
+                  <div className="w-full sm:w-auto min-w-[140px]">
+                    <CustomSelect
+                      value={selectedVendor}
+                      onChange={setSelectedVendor}
+                      color="blue"
+                      options={[
+                        { value: '', label: 'All Suppliers' },
+                        ...vendorsList.map(v => ({ value: v.id, label: v.name }))
+                      ]}
+                    />
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200/60 dark:border-slate-800">
                   <span>📄 {purchaseSummary.totalInvoices || 0} Invoices</span>
                   <span>•</span>
                   <span>📦 {purchaseSummary.totalProducts || 0} Line Items</span>
@@ -1622,6 +1629,186 @@ const Reports = () => {
                     </>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. SALES & GST REPORT FILTER & STATS BAR */}
+          {activeTab === 'sales' && (
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
+              <div className="flex flex-wrap items-center gap-2 text-xs w-full lg:w-auto">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase shrink-0">Filters:</span>
+                <div className="w-full sm:w-auto min-w-[130px]">
+                  <CustomSelect
+                    value={datePreset}
+                    onChange={setDatePreset}
+                    color="blue"
+                    options={[
+                      { value: 'today', label: 'Today' },
+                      { value: '7days', label: 'Last 7 Days' },
+                      { value: '30days', label: 'Last 30 Days' },
+                      { value: 'year', label: 'This Year' },
+                      { value: 'all', label: 'All Time' },
+                      { value: 'custom', label: 'Custom Date Range' }
+                    ]}
+                  />
+                </div>
+
+                {datePreset === 'custom' && (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 w-full sm:w-auto">
+                    <CustomDatePicker
+                      value={startDate}
+                      onChange={setStartDate}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
+                    />
+                    <span className="text-slate-400 text-center text-xs">to</span>
+                    <CustomDatePicker
+                      value={endDate}
+                      onChange={setEndDate}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
+                    />
+                  </div>
+                )}
+
+                <div className="w-full sm:w-auto min-w-[140px]">
+                  <CustomSelect
+                    value={selectedCustomer}
+                    onChange={setSelectedCustomer}
+                    color="blue"
+                    options={[
+                      { value: '', label: 'All Customers' },
+                      ...customersList.map(c => ({ value: c.id, label: `${c.name} (${c.phone || 'No Phone'})` }))
+                    ]}
+                  />
+                </div>
+
+                <div className="w-full sm:w-auto min-w-[130px]">
+                  <CustomSelect
+                    value={selectedEmployee}
+                    onChange={setSelectedEmployee}
+                    color="blue"
+                    options={[
+                      { value: '', label: 'All Staff / Cashiers' },
+                      ...employeesList.map(e => ({ value: e.id, label: e.name }))
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200/60 dark:border-slate-800">
+                <span>📄 {dataList.length} Sales Invoices</span>
+                <span>•</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                  ₹{dataList.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Total Revenue
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 3. INVENTORY VALUATION FILTER & STATS BAR */}
+          {activeTab === 'inventory' && (
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
+              <div className="flex flex-wrap items-center gap-2 text-xs w-full lg:w-auto">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase shrink-0">Filters:</span>
+                <div className="w-full sm:w-auto min-w-[140px]">
+                  <CustomSelect
+                    value={selectedCategory}
+                    onChange={setSelectedCategory}
+                    color="blue"
+                    options={[
+                      { value: '', label: 'All Categories' },
+                      ...categoriesList.map(c => ({ value: c.id, label: c.name }))
+                    ]}
+                  />
+                </div>
+
+                <div className="w-full sm:w-auto min-w-[130px]">
+                  <CustomSelect
+                    value={selectedBrand}
+                    onChange={setSelectedBrand}
+                    color="blue"
+                    options={[
+                      { value: '', label: 'All Brands' },
+                      ...brandsList.map(b => ({ value: typeof b === 'object' ? (b.id || b.name) : b, label: typeof b === 'object' ? b.name : b }))
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200/60 dark:border-slate-800">
+                <span>📦 {dataList.length} Items Listed</span>
+                <span>•</span>
+                <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                  ₹{dataList.reduce((acc, curr) => acc + (Number(curr.valuation) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Total Stock Value
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 4. STOCK ADJUSTMENTS FILTER BAR */}
+          {activeTab === 'adjustments' && (
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-800">
+              <div className="flex flex-wrap items-center gap-2 text-xs w-full lg:w-auto">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase shrink-0">Filters:</span>
+                <div className="w-full sm:w-auto min-w-[130px]">
+                  <CustomSelect
+                    value={datePreset}
+                    onChange={setDatePreset}
+                    color="blue"
+                    options={[
+                      { value: 'today', label: 'Today' },
+                      { value: '7days', label: 'Last 7 Days' },
+                      { value: '30days', label: 'Last 30 Days' },
+                      { value: 'year', label: 'This Year' },
+                      { value: 'all', label: 'All Time' },
+                      { value: 'custom', label: 'Custom Date Range' }
+                    ]}
+                  />
+                </div>
+
+                {datePreset === 'custom' && (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 w-full sm:w-auto">
+                    <CustomDatePicker
+                      value={startDate}
+                      onChange={setStartDate}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
+                    />
+                    <span className="text-slate-400 text-center text-xs">to</span>
+                    <CustomDatePicker
+                      value={endDate}
+                      onChange={setEndDate}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-semibold pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200/60 dark:border-slate-800">
+                <span>⚡ {dataList.length} Adjustment Entries Recorded</span>
+              </div>
+            </div>
+          )}
+
+          {/* 5. LOW STOCK REPORT STATS BAR */}
+          {activeTab === 'lowstock' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/70 dark:border-amber-900/60">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
+                <span>⚠️ Stock Alert Monitoring Hub</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5 text-xs font-bold">
+                <span className="px-2.5 py-0.5 rounded-lg bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200/60 dark:border-red-800/60">
+                  🚨 {dataList.filter(d => d.reorder_status === 'Critical').length} Critical (Zero Stock)
+                </span>
+                <span className="px-2.5 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
+                  📦 {dataList.filter(d => d.reorder_status !== 'Critical').length} Need Replenish
+                </span>
+                <span className="text-slate-500 dark:text-slate-400 font-semibold">
+                  Total: {dataList.length} items
+                </span>
               </div>
             </div>
           )}
@@ -1638,12 +1825,14 @@ const Reports = () => {
               striped={true}
               tableClassName={
                 activeTab === 'purchase'
-                  ? 'min-w-[1360px]'
+                  ? 'min-w-[1300px]'
                   : activeTab === 'adjustments'
-                  ? 'min-w-[1240px]'
+                  ? 'min-w-[1150px]'
                   : activeTab === 'sales'
-                  ? 'min-w-[1080px]'
-                  : 'min-w-[960px]'
+                  ? 'min-w-[1000px]'
+                  : activeTab === 'inventory'
+                  ? 'min-w-[850px]'
+                  : 'min-w-[640px]'
               }
             />
           )}

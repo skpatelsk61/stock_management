@@ -28,6 +28,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import Loader from '../../components/common/Loader';
 import { customersAPI } from '../../services/api';
 import API from '../../services/api'; // Direct imports for borrow features
@@ -462,25 +464,27 @@ const CustomerList = () => {
             </div>
             
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <select
+              <CustomSelect
                 value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50/50 dark:bg-slate-950/20 text-slate-700 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="">All Types</option>
-                <option value="Walk-in">Walk-in Customer</option>
-                <option value="Borrow">Borrow (Credit)</option>
-              </select>
+                onChange={setFilterType}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Types' },
+                  { value: 'Walk-in', label: 'Walk-in Customer' },
+                  { value: 'Borrow', label: 'Borrow (Credit)' }
+                ]}
+              />
 
-              <select
+              <CustomSelect
                 value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50/50 dark:bg-slate-950/20 text-slate-700 dark:text-slate-200 cursor-pointer"
-              >
-                <option value="">All Status</option>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
+                onChange={setFilterStatus}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Status' },
+                  { value: 'Active', label: 'Active' },
+                  { value: 'Inactive', label: 'Inactive' }
+                ]}
+              />
             </div>
           </div>
 
@@ -838,29 +842,31 @@ const CustomerList = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-550 uppercase tracking-wider mb-1">Customer Type *</label>
-                    <select
-                      value={form.customer_type} required
-                      onChange={(e) => setForm({ ...form, customer_type: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-semibold outline-none text-slate-850 dark:text-slate-200"
-                    >
-                      <option value="Borrow">Borrow Customer (Udhaar)</option>
-                      <option value="Walk-in">Walk-in Customer</option>
-                    </select>
+                    <CustomSelect
+                      value={form.customer_type}
+                      onChange={(val) => setForm({ ...form, customer_type: val })}
+                      color="blue"
+                      options={[
+                        { value: 'Borrow', label: 'Borrow Customer (Udhaar)' },
+                        { value: 'Walk-in', label: 'Walk-in Customer' }
+                      ]}
+                    />
                   </div>
 
                   <div>
                     <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-550 uppercase tracking-wider mb-1">Payment Mode *</label>
-                    <select
-                      value={form.payment_mode || 'Cash'} required
-                      onChange={(e) => setForm({ ...form, payment_mode: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-semibold outline-none text-slate-850 dark:text-slate-200"
-                    >
-                      <option value="Cash">Cash</option>
-                      <option value="UPI">UPI</option>
-                      <option value="Card">Card</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                      <option value="Credit (Borrow)">Credit (Borrow)</option>
-                    </select>
+                    <CustomSelect
+                      value={form.payment_mode || 'Cash'}
+                      onChange={(val) => setForm({ ...form, payment_mode: val })}
+                      color="blue"
+                      options={[
+                        { value: 'Cash', label: 'Cash' },
+                        { value: 'UPI', label: 'UPI' },
+                        { value: 'Card', label: 'Card' },
+                        { value: 'Bank Transfer', label: 'Bank Transfer' },
+                        { value: 'Credit (Borrow)', label: 'Credit (Borrow)' }
+                      ]}
+                    />
                   </div>
                 </div>
 
@@ -956,11 +962,12 @@ const CustomerList = () => {
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Payment Date *</label>
-                  <input
-                    type="date" required
+                  <CustomDatePicker
                     value={paybackForm.date}
-                    onChange={(e) => setPaybackForm({ ...paybackForm, date: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold outline-none text-slate-800 dark:text-slate-200"
+                    onChange={(d) => setPaybackForm({ ...paybackForm, date: d })}
+                    required={true}
+                    placeholder="dd-mm-yyyy"
+                    color="blue"
                   />
                 </div>
 
@@ -1034,21 +1041,23 @@ const CustomerList = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Borrow Date *</label>
-                    <input
-                      type="date" required
+                    <CustomDatePicker
                       value={newBorrowForm.borrow_date}
-                      onChange={(e) => setNewBorrowForm({ ...newBorrowForm, borrow_date: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold outline-none text-slate-800 dark:text-slate-200"
+                      onChange={(d) => setNewBorrowForm({ ...newBorrowForm, borrow_date: d })}
+                      required={true}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
 
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Due Date *</label>
-                    <input
-                      type="date" required
+                    <CustomDatePicker
                       value={newBorrowForm.due_date}
-                      onChange={(e) => setNewBorrowForm({ ...newBorrowForm, due_date: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold outline-none text-slate-800 dark:text-slate-200"
+                      onChange={(d) => setNewBorrowForm({ ...newBorrowForm, due_date: d })}
+                      required={true}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                 </div>

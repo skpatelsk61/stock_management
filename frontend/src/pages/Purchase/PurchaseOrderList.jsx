@@ -21,6 +21,7 @@ import PurchaseOrderForm from '../../components/forms/PurchaseOrderForm';
 import GRNForm from '../../components/forms/GRNForm';
 import PurchaseForm from '../../components/forms/PurchaseForm';
 import Modal from '../../components/common/Modal';
+import CustomSelect from '../../components/common/CustomSelect';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 
@@ -655,20 +656,22 @@ const PurchaseOrderList = () => {
           />
         </div>
         
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-50/50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 font-bold"
-        >
-          <option value="all">All Statuses</option>
-          <option value="Pending">Pending</option>
-          <option value="Partially Pending">Partially Pending</option>
-          <option value="Completed">Completed</option>
-          <option value="Draft">Draft</option>
-          <option value="Sent">Sent</option>
-          <option value="Confirmed">Confirmed</option>
-          <option value="Cancelled">Cancelled</option>
-        </select>
+        <div className="w-56 shrink-0">
+          <CustomSelect
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All Statuses" },
+              { value: "Pending", label: "Pending" },
+              { value: "Partially Pending", label: "Partially Pending" },
+              { value: "Completed", label: "Completed" },
+              { value: "Draft", label: "Draft" },
+              { value: "Sent", label: "Sent" },
+              { value: "Confirmed", label: "Confirmed" },
+              { value: "Cancelled", label: "Cancelled" },
+            ]}
+          />
+        </div>
       </div>
 
       {/* 3. Orders List Table */}

@@ -22,6 +22,7 @@ import Modal from '../../components/common/Modal';
 import SalesForm from '../../components/forms/SalesForm';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
 import { salesAPI, settingsAPI } from '../../services/api';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { fetchStockSummary, fetchStockAlerts } from '../../store/slices/stockSlice';
@@ -691,59 +692,54 @@ const SalesList = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             {/* Customer Filter */}
-            <select
+            <CustomSelect
               value={customerFilter}
-              onChange={(e) => setCustomerFilter(e.target.value)}
-              className="bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-bold"
-            >
-              <option value="All">All Customers</option>
-              {uniqueCustomers
-                .filter((c) => c !== 'All')
-                .map((cust) => (
-                  <option key={cust} value={cust}>
-                    {cust}
-                  </option>
-                ))}
-            </select>
+              onChange={setCustomerFilter}
+              searchable={uniqueCustomers.length > 6}
+              searchPlaceholder="Search customer..."
+              options={uniqueCustomers.map((c) => ({
+                value: c,
+                label: c === "All" ? "All Customers" : c,
+              }))}
+            />
 
             {/* Payment Status Filter */}
-            <select
+            <CustomSelect
               value={paymentStatusFilter}
-              onChange={(e) => setPaymentStatusFilter(e.target.value)}
-              className="bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-bold"
-            >
-              <option value="All">All Payments</option>
-              <option value="Paid">Paid</option>
-              <option value="Partial">Partial</option>
-              <option value="Pending">Pending / Udhaar</option>
-            </select>
+              onChange={setPaymentStatusFilter}
+              options={[
+                { value: "All", label: "All Payments" },
+                { value: "Paid", label: "Paid" },
+                { value: "Partial", label: "Partial" },
+                { value: "Pending", label: "Pending / Udhaar" },
+              ]}
+            />
 
             {/* Date Range Filter */}
-            <select
+            <CustomSelect
               value={dateRangeFilter}
-              onChange={(e) => setDateRangeFilter(e.target.value)}
-              className="bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-bold"
-            >
-              <option value="All">All Dates</option>
-              <option value="Today">Today</option>
-              <option value="Yesterday">Yesterday</option>
-              <option value="7days">Last 7 Days</option>
-              <option value="thisMonth">This Month</option>
-            </select>
+              onChange={setDateRangeFilter}
+              options={[
+                { value: "All", label: "All Dates" },
+                { value: "Today", label: "Today" },
+                { value: "Yesterday", label: "Yesterday" },
+                { value: "7days", label: "Last 7 Days" },
+                { value: "thisMonth", label: "This Month" },
+              ]}
+            />
 
             {/* Sort Order Selector (Defaults to Newest First) */}
-            <select
+            <CustomSelect
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 font-bold"
-            >
-              <option value="newest">Sort: Newest First</option>
-              <option value="oldest">Sort: Oldest First</option>
-              <option value="highestTotal">Sort: Highest Total</option>
-              <option value="lowestTotal">Sort: Lowest Total</option>
-              <option value="invoiceNo">Sort: Invoice No</option>
-            </select>
-
+              onChange={setSortBy}
+              options={[
+                { value: "newest", label: "Sort: Newest First" },
+                { value: "oldest", label: "Sort: Oldest First" },
+                { value: "highestTotal", label: "Sort: Highest Total" },
+                { value: "lowestTotal", label: "Sort: Lowest Total" },
+                { value: "invoiceNo", label: "Sort: Invoice No" },
+              ]}
+            />
             {/* Clear Filters */}
             <button
               onClick={handleResetFilters}
@@ -930,18 +926,21 @@ const SalesList = () => {
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400 text-[11px]">Rows per page:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => setPageSize(Number(e.target.value))}
-                    className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 dark:text-slate-300"
-                  >
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 text-[11px] whitespace-nowrap">Rows per page:</span>
+                  <div className="w-20">
+                    <CustomSelect
+                      value={pageSize}
+                      onChange={(val) => setPageSize(Number(val))}
+                      color="blue"
+                      options={[
+                        { value: 10, label: '10' },
+                        { value: 20, label: '20' },
+                        { value: 50, label: '50' },
+                        { value: 100, label: '100' }
+                      ]}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1">

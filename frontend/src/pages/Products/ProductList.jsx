@@ -27,6 +27,7 @@ import Modal from '../../components/common/Modal';
 import ProductForm from '../../components/forms/ProductForm';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
 import ProductImportWizardModal from '../../components/products/ProductImportWizardModal';
 import { productsAPI, categoriesAPI, stockAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
@@ -69,6 +70,7 @@ const ProductList = () => {
   const [dbOffline, setDbOffline] = useState(false);
   const [loading, setLoading] = useState(!cachedProductListState);
   const [selectedVariantIds, setSelectedVariantIds] = useState({});
+  const [openVariantDropdownKey, setOpenVariantDropdownKey] = useState(null);
 
   // Search & Filter state variables
   const [searchQuery, setSearchQuery] = useState('');
@@ -1055,86 +1057,85 @@ const ProductList = () => {
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
             />
           </div>
-
           {/* Category Dropdown Picker */}
           <div>
-            <select
-              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50/50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
+            <CustomSelect
               value={categoryFilter}
-              onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-            >
-              <option value="All" className="dark:bg-slate-800 dark:text-slate-200">All Categories</option>
-              {uniqueCategories.filter(c => c !== 'All').map((c) => (
-                <option key={c} value={c} className="dark:bg-slate-800 dark:text-slate-200">{c}</option>
-              ))}
-            </select>
+              onChange={(val) => { setCategoryFilter(val); setCurrentPage(1); }}
+              searchable={uniqueCategories.length > 6}
+              searchPlaceholder="Search category..."
+              options={uniqueCategories.map((c) => ({
+                value: c,
+                label: c === "All" ? "All Categories" : c,
+              }))}
+            />
           </div>
 
           {/* Brand Dropdown Picker */}
           <div>
-            <select
-              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50/50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
+            <CustomSelect
               value={brandFilter}
-              onChange={(e) => { setBrandFilter(e.target.value); setCurrentPage(1); }}
-            >
-              <option value="All" className="dark:bg-slate-800 dark:text-slate-200">All Brands</option>
-              {uniqueBrands.filter(b => b !== 'All').map((b) => (
-                <option key={b} value={b} className="dark:bg-slate-800 dark:text-slate-200">{b}</option>
-              ))}
-            </select>
+              onChange={(val) => { setBrandFilter(val); setCurrentPage(1); }}
+              searchable={uniqueBrands.length > 6}
+              searchPlaceholder="Search brand..."
+              options={uniqueBrands.map((b) => ({
+                value: b,
+                label: b === "All" ? "All Brands" : b,
+              }))}
+            />
           </div>
 
           {/* Stock Status Selector */}
           <div>
-            <select
-              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50/50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
+            <CustomSelect
               value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-            >
-              <option value="All" className="dark:bg-slate-800 dark:text-slate-200">All Statuses</option>
-              <option value="In Stock" className="dark:bg-slate-800 dark:text-slate-200">In Stock</option>
-              <option value="Low Stock" className="dark:bg-slate-800 dark:text-slate-200">Low Stock</option>
-              <option value="Out Of Stock" className="dark:bg-slate-800 dark:text-slate-200">Out Of Stock</option>
-              <option value="Near Expiry" className="dark:bg-slate-800 dark:text-slate-200">Near Expiry</option>
-              <option value="Expired" className="dark:bg-slate-800 dark:text-slate-200">Expired</option>
-            </select>
+              onChange={(val) => { setStatusFilter(val); setCurrentPage(1); }}
+              options={[
+                { value: "All", label: "All Statuses" },
+                { value: "In Stock", label: "In Stock" },
+                { value: "Low Stock", label: "Low Stock" },
+                { value: "Out Of Stock", label: "Out Of Stock" },
+                { value: "Near Expiry", label: "Near Expiry" },
+                { value: "Expired", label: "Expired" },
+              ]}
+            />
           </div>
 
           {/* Price Range Segmentation */}
           <div>
-            <select
-              className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-blue-500 bg-slate-50/50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
+            <CustomSelect
               value={priceRange}
-              onChange={(e) => { setPriceRange(e.target.value); setCurrentPage(1); }}
-            >
-              <option value="All" className="dark:bg-slate-800 dark:text-slate-200">All Prices</option>
-              <option value="under-50" className="dark:bg-slate-800 dark:text-slate-200">Under ₹50</option>
-              <option value="50-200" className="dark:bg-slate-800 dark:text-slate-200">₹50 - ₹200</option>
-              <option value="above-200" className="dark:bg-slate-800 dark:text-slate-200">Above ₹200</option>
-            </select>
+              onChange={(val) => { setPriceRange(val); setCurrentPage(1); }}
+              options={[
+                { value: "All", label: "All Prices" },
+                { value: "under-50", label: "Under ₹50" },
+                { value: "50-200", label: "₹50 - ₹200" },
+                { value: "above-200", label: "Above ₹200" },
+              ]}
+            />
           </div>
 
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">Sort By:</span>
-            <select
-              className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-blue-500 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-            >
-              <option value="name-asc" className="dark:bg-slate-800 dark:text-slate-200">Product Name (A-Z)</option>
-              <option value="name-desc" className="dark:bg-slate-800 dark:text-slate-200">Product Name (Z-A)</option>
-              <option value="stock-desc" className="dark:bg-slate-800 dark:text-slate-200">Stock Vol (High-Low)</option>
-              <option value="stock-asc" className="dark:bg-slate-800 dark:text-slate-200">Stock Vol (Low-High)</option>
-              <option value="price-desc" className="dark:bg-slate-800 dark:text-slate-200">Price (High-Low)</option>
-              <option value="price-asc" className="dark:bg-slate-800 dark:text-slate-200">Price (Low-High)</option>
-            </select>
+            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider shrink-0">Sort By:</span>
+            <div className="min-w-[190px]">
+              <CustomSelect
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { value: "name-asc", label: "Product Name (A-Z)" },
+                  { value: "name-desc", label: "Product Name (Z-A)" },
+                  { value: "stock-desc", label: "Stock Vol (High-Low)" },
+                  { value: "stock-asc", label: "Stock Vol (Low-High)" },
+                  { value: "price-desc", label: "Price (High-Low)" },
+                  { value: "price-asc", label: "Price (Low-High)" },
+                ]}
+              />
+            </div>
           </div>
-          <button
-            onClick={handleResetFilters}
-            className="w-full sm:w-auto px-4 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50/60 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 rounded-xl transition-all text-center cursor-pointer"
+          <button onClick={handleResetFilters} className="w-full sm:w-auto px-4 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50/60 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 rounded-xl transition-all text-center cursor-pointer"
           >
             Reset Filters
           </button>
@@ -1248,26 +1249,71 @@ const ProductList = () => {
                           {/* WEIGHT COLUMN */}
                           <td className="py-3 px-4 whitespace-nowrap">
                             {group.variants.length > 1 ? (
-                              <div className="relative inline-block">
-                                <select
-                                  value={p.id}
-                                  onChange={(e) => {
-                                    const vId = Number(e.target.value);
-                                    setSelectedVariantIds(prev => ({ ...prev, [group.groupKey]: vId }));
-                                  }}
-                                  className="pl-2.5 pr-7 py-1 text-xs font-bold border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-sm appearance-none"
+                              <div className="relative inline-block text-left">
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenVariantDropdownKey(openVariantDropdownKey === group.groupKey ? null : group.groupKey)}
+                                  className={`flex items-center gap-1.5 pl-3 pr-2.5 py-1 text-xs font-extrabold rounded-xl border transition-all duration-150 cursor-pointer shadow-2xs select-none ${
+                                    openVariantDropdownKey === group.groupKey
+                                      ? "bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-500/25 shadow-sm"
+                                      : "bg-indigo-50/80 hover:bg-indigo-100/90 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400"
+                                  }`}
+                                  title="Change Pack / Weight Variant"
                                 >
-                                  {group.variants.map((v) => (
-                                    <option key={v.id} value={v.id} className="dark:bg-slate-800 dark:text-slate-200">
-                                      {v.measurement_value || v.unit || 'Standard'}
-                                    </option>
-                                  ))}
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-indigo-500">
-                                  <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20">
-                                    <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd"></path>
+                                  <span>{p.measurement_value || p.unit || "Standard"}</span>
+                                  <svg
+                                    className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                                      openVariantDropdownKey === group.groupKey ? "rotate-180 text-white" : "text-indigo-500 dark:text-indigo-400"
+                                    }`}
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                  >
+                                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06z" clipRule="evenodd" />
                                   </svg>
-                                </div>
+                                </button>
+
+                                {openVariantDropdownKey === group.groupKey && (
+                                  <>
+                                    <div className="fixed inset-0 z-30" onClick={() => setOpenVariantDropdownKey(null)} />
+                                    <div className="agy-dropdown-panel absolute left-0 mt-1.5 min-w-[145px] z-40 p-1.5 space-y-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl">
+                                      <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800/80 mb-1 flex items-center justify-between">
+                                        <span>Select Variant</span>
+                                        <span className="text-[9px] font-mono font-bold text-indigo-600 dark:text-indigo-400">{group.variants.length} sizes</span>
+                                      </div>
+                                      <div className="max-h-52 overflow-y-auto custom-scrollbar space-y-0.5">
+                                        {group.variants.map((v) => {
+                                          const isSelected = v.id === p.id;
+                                          return (
+                                            <button
+                                              key={v.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setSelectedVariantIds(prev => ({ ...prev, [group.groupKey]: v.id }));
+                                                setOpenVariantDropdownKey(null);
+                                              }}
+                                              className={`w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all text-left cursor-pointer ${
+                                                isSelected
+                                                  ? "bg-indigo-600 text-white shadow-xs"
+                                                  : "text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:text-indigo-600 dark:hover:text-indigo-300"
+                                              }`}
+                                            >
+                                              <span className="truncate">{v.measurement_value || v.unit || "Standard"}</span>
+                                              {isSelected ? (
+                                                <svg className="w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                              ) : (
+                                                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 shrink-0 font-normal">
+                                                  ₹{v.sellingPrice ?? v.selling_price ?? 0}
+                                                </span>
+                                              )}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             ) : (
                               <span className="inline-block px-2.5 py-1 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
@@ -1393,16 +1439,23 @@ const ProductList = () => {
         <div className="bg-slate-50/50 dark:bg-slate-900 px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-500 dark:text-slate-400 select-none font-semibold">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <span>Rows Per Page:</span>
-              <select
-                className="px-2 py-1 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500"
-                value={rowsPerPage}
-                onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-              >
-                {[10, 25, 50, 100].map((rows) => (
-                  <option key={rows} value={rows} className="dark:bg-slate-800 dark:text-slate-200">{rows}</option>
-                ))}
-              </select>
+              <span className="whitespace-nowrap">Rows Per Page:</span>
+              <div className="w-20">
+                <CustomSelect
+                  value={rowsPerPage}
+                  onChange={(val) => {
+                    setRowsPerPage(Number(val));
+                    setCurrentPage(1);
+                  }}
+                  color="blue"
+                  options={[
+                    { value: 10, label: '10' },
+                    { value: 25, label: '25' },
+                    { value: 50, label: '50' },
+                    { value: 100, label: '100' }
+                  ]}
+                />
+              </div>
             </div>
             <span>
               Showing <span className="text-slate-900 dark:text-white font-bold">{groupedProducts.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}</span> to{' '}
@@ -1614,17 +1667,18 @@ const ProductList = () => {
                 <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
                   GST Rate (%)
                 </label>
-                <select
+                <CustomSelect
                   value={quickPrices.gst}
-                  onChange={(e) => setQuickPrices((prev) => ({ ...prev, gst: e.target.value }))}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none cursor-pointer"
-                >
-                  <option value="0">0% (Exempted)</option>
-                  <option value="5">5% (Essential)</option>
-                  <option value="12">12% (Standard 1)</option>
-                  <option value="18">18% (Standard 2)</option>
-                  <option value="28">28% (Luxury)</option>
-                </select>
+                  onChange={(val) => setQuickPrices((prev) => ({ ...prev, gst: val }))}
+                  color="blue"
+                  options={[
+                    { value: '0', label: '0% (Exempted)' },
+                    { value: '5', label: '5% (Essential)' },
+                    { value: '12', label: '12% (Standard 1)' },
+                    { value: '18', label: '18% (Standard 2)' },
+                    { value: '28', label: '28% (Luxury)' }
+                  ]}
+                />
               </div>
             </div>
 

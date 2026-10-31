@@ -454,7 +454,7 @@ const Header = ({ onOpenShortcuts }) => {
                 </button>
 
                 {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-[calc(100vw-28px)] max-w-sm sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 z-50 overflow-hidden">
+                  <div className="agy-dropdown-panel absolute right-0 mt-2 w-[calc(100vw-28px)] max-w-sm sm:w-96 z-50 overflow-hidden">
                     <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/80">
                       <div>
                         <h3 className="font-bold text-slate-900 dark:text-white text-xs">Notifications</h3>
@@ -538,7 +538,7 @@ const Header = ({ onOpenShortcuts }) => {
                 </button>
 
                 {showProfileMenu && (
-                  <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 z-50 py-1 overflow-hidden">
+                  <div className="agy-dropdown-panel absolute right-0 mt-2 w-52 z-50 py-1 overflow-hidden">
                     <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40">
                       <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{user?.name || 'Admin User'}</p>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{user?.email}</p>

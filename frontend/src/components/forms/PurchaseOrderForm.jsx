@@ -19,6 +19,8 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { vendorsAPI, productsAPI, categoriesAPI } from '../../services/api';
+import CustomSelect from '../common/CustomSelect';
+import CustomDatePicker from '../common/CustomDatePicker';
 
 const normProduct = (p) => ({
   id: p.id,
@@ -317,21 +319,22 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
                 Select Vendor / Supplier <span className="text-rose-500">*</span>
               </span>
             </label>
-            <select
+            <CustomSelect
               value={formData.vendorId}
-              onChange={(e) => {
-                setFormData({ ...formData, vendorId: e.target.value });
+              onChange={(val) => {
+                setFormData({ ...formData, vendorId: val });
                 if (errors.vendorId) setErrors((prev) => ({ ...prev, vendorId: null }));
               }}
-              className="w-full bg-white border border-slate-300 hover:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all shadow-2xs"
-            >
-              <option value="">-- Choose Supplier Partner --</option>
-              {dbVendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name} {v.company_name ? `(${v.company_name})` : ''}
-                </option>
-              ))}
-            </select>
+              color="blue"
+              placeholder="-- Choose Supplier Partner --"
+              options={[
+                { value: '', label: '-- Choose Supplier Partner --' },
+                ...dbVendors.map((v) => ({
+                  value: v.id,
+                  label: `${v.name} ${v.company_name ? `(${v.company_name})` : ''}`
+                }))
+              ]}
+            />
             {errors.vendorId && (
               <p className="text-[11px] font-bold text-rose-500 flex items-center gap-1 mt-1">
                 <InformationCircleIcon className="w-3.5 h-3.5" />
@@ -361,11 +364,11 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
               <CalendarIcon className="w-4 h-4 text-indigo-500" />
               Order Date <span className="text-rose-500">*</span>
             </label>
-            <input
-              type="date"
+            <CustomDatePicker
               value={formData.date}
-              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              className="w-full bg-white border border-slate-300 hover:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all shadow-2xs"
+              onChange={(d) => setFormData({ ...formData, date: d })}
+              placeholder="dd-mm-yyyy"
+              color="blue"
             />
           </div>
 
@@ -375,11 +378,11 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
               <CalendarIcon className="w-4 h-4 text-emerald-500" />
               Expected Delivery
             </label>
-            <input
-              type="date"
+            <CustomDatePicker
               value={formData.expectedDeliveryDate}
-              onChange={(e) => setFormData({ ...formData, expectedDeliveryDate: e.target.value })}
-              className="w-full bg-white border border-slate-300 hover:border-indigo-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all shadow-2xs"
+              onChange={(d) => setFormData({ ...formData, expectedDeliveryDate: d })}
+              placeholder="dd-mm-yyyy"
+              color="blue"
             />
           </div>
 
@@ -418,18 +421,19 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
               <FunnelIcon className="w-3.5 h-3.5 text-indigo-500" />
               Product Category
             </label>
-            <select
+            <CustomSelect
               value={selectedCategory}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              className="w-full bg-slate-50/80 border border-slate-200 hover:border-indigo-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all cursor-pointer"
-            >
-              <option value="">-- All Categories --</option>
-              {dbCategories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={handleCategoryChange}
+              color="blue"
+              placeholder="-- All Categories --"
+              options={[
+                { value: '', label: '-- All Categories --' },
+                ...dbCategories.map((c) => ({
+                  value: c.id,
+                  label: c.name
+                }))
+              ]}
+            />
           </div>
 
           {/* 2. Product Selection (Expandable Tree with Scrollbar) */}
@@ -508,7 +512,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
 
             {/* Tree Dropdown Menu Popover */}
             {isProductDropdownOpen && (
-              <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-fadeIn">
+              <div className="agy-dropdown-panel absolute left-0 right-0 top-full mt-1.5 z-50 overflow-hidden">
                 
                 {/* Search & Bulk Expand Header */}
                 <div className="p-2 border-b border-slate-100 bg-slate-50/80 space-y-2">

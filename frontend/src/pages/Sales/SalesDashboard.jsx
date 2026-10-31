@@ -26,6 +26,8 @@ import {
   ArrowUturnLeftIcon
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import Loader from '../../components/common/Loader';
 import { useAppSelector } from '../../store/hooks';
 import API, { reportsAPI, usersAPI, customersAPI, productsAPI } from '../../services/api';
@@ -262,76 +264,84 @@ const SalesDashboard = () => {
           {/* Date Preset Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Date Preset</label>
-            <select
+            <CustomSelect
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50"
-            >
-              <option value="today">Today</option>
-              <option value="7days">Last 7 Days</option>
-              <option value="30days">Last 30 Days</option>
-              <option value="custom">Custom Date Range</option>
-            </select>
+              onChange={setDateRange}
+              color="blue"
+              options={[
+                { value: 'today', label: 'Today' },
+                { value: '7days', label: 'Last 7 Days' },
+                { value: '30days', label: 'Last 30 Days' },
+                { value: 'custom', label: 'Custom Date Range' }
+              ]}
+            />
           </div>
 
           {/* Employee Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Sales Operator</label>
-            <select
+            <CustomSelect
               value={selectedEmployee}
-              onChange={(e) => setSelectedEmployee(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50"
-            >
-              <option value="all">All Employees</option>
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name} ({emp.department || 'Sales'})</option>
-              ))}
-            </select>
+              onChange={setSelectedEmployee}
+              color="blue"
+              options={[
+                { value: 'all', label: 'All Employees' },
+                ...employees.map(emp => ({
+                  value: emp.id,
+                  label: `${emp.name} (${emp.department || 'Sales'})`
+                }))
+              ]}
+            />
           </div>
 
           {/* Customer Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Customer</label>
-            <select
+            <CustomSelect
               value={selectedCustomer}
-              onChange={(e) => setSelectedCustomer(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50"
-            >
-              <option value="all">All Customers</option>
-              {customers.map(cust => (
-                <option key={cust.id} value={cust.id}>{cust.name} ({cust.phone})</option>
-              ))}
-            </select>
+              onChange={setSelectedCustomer}
+              color="blue"
+              options={[
+                { value: 'all', label: 'All Customers' },
+                ...customers.map(cust => ({
+                  value: cust.id,
+                  label: `${cust.name} (${cust.phone})`
+                }))
+              ]}
+            />
           </div>
 
           {/* Product Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Product sold</label>
-            <select
+            <CustomSelect
               value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold bg-slate-50"
-            >
-              <option value="all">All Products</option>
-              {products.map(prod => (
-                <option key={prod.id} value={prod.id}>{prod.name}</option>
-              ))}
-            </select>
+              onChange={setSelectedProduct}
+              color="blue"
+              options={[
+                { value: 'all', label: 'All Products' },
+                ...products.map(prod => ({
+                  value: prod.id,
+                  label: prod.name
+                }))
+              ]}
+            />
           </div>
 
           {/* Payment Status Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Payment Status</label>
-            <select
+            <CustomSelect
               value={selectedPaymentStatus}
-              onChange={(e) => setSelectedPaymentStatus(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Paid">Paid Only</option>
-              <option value="Pending">Pending / Unpaid</option>
-              <option value="Failed">Failed</option>
-            </select>
+              onChange={setSelectedPaymentStatus}
+              color="blue"
+              options={[
+                { value: 'all', label: 'All Statuses' },
+                { value: 'Paid', label: 'Paid Only' },
+                { value: 'Pending', label: 'Pending / Unpaid' },
+                { value: 'Failed', label: 'Failed' }
+              ]}
+            />
           </div>
         </div>
 
@@ -344,20 +354,20 @@ const SalesDashboard = () => {
           >
             <div>
               <label className="block text-[10px] font-bold text-slate-550 uppercase tracking-wider mb-1">From Date</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50"
+                onChange={setStartDate}
+                placeholder="dd-mm-yyyy"
+                color="blue"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold text-slate-550 uppercase tracking-wider mb-1">To Date</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50"
+                onChange={setEndDate}
+                placeholder="dd-mm-yyyy"
+                color="blue"
               />
             </div>
           </motion.div>

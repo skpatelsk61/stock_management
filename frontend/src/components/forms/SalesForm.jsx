@@ -27,6 +27,8 @@ import {
 import { productsAPI, customersAPI, settingsAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 import { motion, AnimatePresence } from 'framer-motion';
+import CustomSelect from '../common/CustomSelect';
+import CustomDatePicker from '../common/CustomDatePicker';
 
 /* ── Toast Notification ── */
 const Toast = ({ toast }) => {
@@ -362,18 +364,29 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 const existingIdx = prev.findIndex((i) => i.productId === product.id);
                 if (existingIdx !== -1) {
                     const item = { ...prev[existingIdx] };
-                    if (item.quantity + 1 > currentStock) {
+                    // Determine the current qty in base units
+                    const newQtyBase = Number(item.quantity) + 1;
+                    if (newQtyBase > currentStock) {
                         showToast(`Cannot add more. Available stock for "${product.name}" is ${currentStock} ${product.unit || 'Pcs'}.`, 'error');
                         return prev;
                     }
                     const updated = [...prev];
-                    item.quantity = Number(item.quantity) + 1;
+                    item.quantity = newQtyBase;
                     item.availableStock = currentStock;
+                    // Sync inputQty to reflect the new quantity in the selected display unit
+                    const sel = (item.selectedUnit || item.unit || 'Pcs').trim().toLowerCase();
+                    const base = (item.unit || 'Pcs').trim().toLowerCase();
+                    if ((base === 'kg' || base === 'kilogram') && (sel === 'g' || sel === 'grams')) {
+                        item.inputQty = Number((newQtyBase * 1000).toFixed(3));
+                    } else if ((base === 'litre' || base === 'l') && (sel === 'ml' || sel === 'millilitre')) {
+                        item.inputQty = Number((newQtyBase * 1000).toFixed(3));
+                    } else {
+                        item.inputQty = newQtyBase;
+                    }
                     const p = Number(item.price) || 0;
-                    const q = item.quantity;
                     const d = Math.min(100, Math.max(0, Number(item.discount) || 0));
                     const g = Number(item.gst) || 0;
-                    const sub = p * q;
+                    const sub = p * newQtyBase;
                     const discAmt = (sub * d) / 100;
                     const taxable = sub - discAmt;
                     item.subtotal = sub;
@@ -442,35 +455,34 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 item.quantity = qtyInBaseUnit;
             } else if (field === 'inputQty' || field === 'quantity') {
                 const discrete = isDiscreteUnit(item.unit);
-                let rawVal = value === '' ? '' : Number(value);
-                
+                // Preserve empty string while user is typing; convert to number for calculations
+                const isEmpty = value === '' || value === null || value === undefined;
+                let rawVal = isEmpty ? '' : Number(value);
+
                 // Enforce integer-only quantity for discrete count units (Packet, Box, Bottle, Piece, Pcs, Sachet, Carton, Dozen)
                 if (discrete && rawVal !== '') {
                     rawVal = Math.max(1, Math.floor(rawVal));
                 }
 
+                // Always store what the user typed in inputQty (display field)
                 item.inputQty = rawVal;
-                let sel = (item.selectedUnit || item.unit || 'Pcs').trim().toLowerCase();
 
-                // Smart auto-switch to Grams/Ml if user types a large number (>= 15) for Kg/Litre items while selectedUnit is Kg/Litre
-                if (!discrete && (base === 'kg' || base === 'kilogram') && sel === 'kg' && Number(rawVal) >= 15) {
-                    item.selectedUnit = 'g';
-                    sel = 'g';
-                } else if (!discrete && (base === 'litre' || base === 'l') && sel === 'litre' && Number(rawVal) >= 15) {
-                    item.selectedUnit = 'ml';
-                    sel = 'ml';
-                }
+                // Use the current selectedUnit as-is — never silently mutate selectedUnit here.
+                // The user changes the unit explicitly via the unit dropdown.
+                const sel = (item.selectedUnit || item.unit || 'Pcs').trim().toLowerCase();
 
-                let qtyInBaseUnit = Number(rawVal) || 0;
+                // Convert display qty → base-unit qty for stock and billing
+                const numericVal = Number(rawVal) || 0;
+                let qtyInBaseUnit = numericVal;
                 if (!discrete) {
                     if ((base === 'kg' || base === 'kilogram') && (sel === 'g' || sel === 'grams')) {
-                        qtyInBaseUnit = Number(rawVal) / 1000;
+                        qtyInBaseUnit = numericVal / 1000;
                     } else if ((base === 'litre' || base === 'l') && (sel === 'ml' || sel === 'millilitre')) {
-                        qtyInBaseUnit = Number(rawVal) / 1000;
+                        qtyInBaseUnit = numericVal / 1000;
                     } else if (base === 'grams' && (sel === 'kg' || sel === 'kilogram')) {
-                        qtyInBaseUnit = Number(rawVal) * 1000;
+                        qtyInBaseUnit = numericVal * 1000;
                     } else if (base === 'ml' && (sel === 'litre' || sel === 'l')) {
-                        qtyInBaseUnit = Number(rawVal) * 1000;
+                        qtyInBaseUnit = numericVal * 1000;
                     }
                 }
 
@@ -877,15 +889,14 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         <HashtagIcon className="w-3.5 h-3.5 text-white/70 dark:text-emerald-400" />
                         {invoiceNumber}
                     </div>
-                    <div className="flex items-center gap-2 bg-white/20 dark:bg-[#0d101a] border border-white/30 dark:border-slate-800 rounded-xl px-3 py-1.5 text-xs font-medium text-white dark:text-slate-300">
-                        <CalendarDaysIcon className="w-3.5 h-3.5 text-white/70 dark:text-emerald-400" />
-                        <input
-                            type="date"
-                            value={billDate}
-                            onChange={(e) => setBillDate(e.target.value)}
-                            className="bg-transparent outline-none text-white dark:text-slate-200 cursor-pointer w-24 text-right text-xs font-medium"
-                        />
-                    </div>
+                    <CustomDatePicker
+                        value={billDate}
+                        onChange={setBillDate}
+                        color="emerald"
+                        align="right"
+                        className="!w-auto"
+                        triggerClassName="flex items-center gap-2 bg-white/20 hover:bg-white/25 dark:bg-[#0d101a] dark:hover:bg-slate-800 border border-white/30 dark:border-slate-800 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-white dark:text-emerald-300 transition-all cursor-pointer shadow-xs"
+                    />
                     <button
                         onClick={onCancel}
                         className="p-2 bg-white/10 dark:bg-[#0d101a] hover:bg-white/20 dark:hover:bg-slate-800/60 text-white/80 dark:text-slate-400 hover:text-white dark:hover:text-white rounded-xl border border-white/30 dark:border-slate-800 transition-all cursor-pointer"
@@ -947,7 +958,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         </div>
 
                         {showDropdown && (
-                            <div className="mt-2 bg-white dark:bg-[#1a1f2e] border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xl dark:shadow-2xl dark:shadow-black/60 max-h-[360px] overflow-y-auto custom-scrollbar p-2 space-y-1.5 z-30 relative">
+                            <div className="agy-dropdown-panel mt-2 max-h-[360px] overflow-y-auto custom-scrollbar p-2 space-y-1.5 z-30 relative w-full">
                                 {groupedProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-gray-400 dark:text-slate-500 font-medium">
                                         {searchQuery ? 'No matching products found' : 'Start typing to search...'}
@@ -1184,7 +1195,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                         </div>
 
                         {showCustomerDropdown && (
-                            <div className="absolute z-30 w-full bg-white dark:bg-[#1a1f2e] border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl dark:shadow-2xl dark:shadow-black/60 mt-1 p-2 space-y-2 max-h-[220px] overflow-y-auto">
+                            <div className="agy-dropdown-panel absolute z-30 w-full mt-1 p-2 space-y-2 max-h-[220px] overflow-y-auto">
                                 <div className="flex items-center gap-2 border border-gray-200 dark:border-slate-800 rounded-lg px-2 py-1.5 bg-gray-50 dark:bg-[#0d101a]">
                                     <MagnifyingGlassIcon className="w-4 h-4 text-gray-400 dark:text-slate-500" />
                                     <input
@@ -1416,7 +1427,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                                 value={item.selectedUnit || 'Kg'}
                                                                 onChange={(e) => handleUpdateItem(idx, 'selectedUnit', e.target.value)}
                                                                 onClick={(e) => e.stopPropagation()}
-                                                                className="text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded px-1 py-1 outline-none cursor-pointer ml-1"
+                                                                className="agy-unit-select bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 ml-1"
                                                             >
                                                                 <option value="Kg">Kg</option>
                                                                 <option value="g">g (Grams)</option>
@@ -1426,7 +1437,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                                 value={item.selectedUnit || 'Litre'}
                                                                 onChange={(e) => handleUpdateItem(idx, 'selectedUnit', e.target.value)}
                                                                 onClick={(e) => e.stopPropagation()}
-                                                                className="text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded px-1 py-1 outline-none cursor-pointer ml-1"
+                                                                className="agy-unit-select bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 ml-1"
                                                             >
                                                                 <option value="Litre">L (Litre)</option>
                                                                 <option value="ml">ml</option>
@@ -1623,23 +1634,23 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                             <div className="flex items-center justify-between gap-1.5 mb-1.5 min-w-0">
                                                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                                     <span className="text-xs font-black text-slate-400 shrink-0">#{idx + 1}</span>
-                                                    <select
-                                                        value={row.paymentMethod}
-                                                        onChange={(e) => handlePaymentRowChange(row.id, 'paymentMethod', e.target.value)}
-                                                        className="w-full min-w-0 truncate px-2 py-1 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-[#121824] text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-[#0F4C3A]"
-                                                    >
-                                                        <option value="Cash">💵 Cash</option>
-                                                        <option value="UPI">📱 UPI / QR Code</option>
-                                                        <option value="Credit/Debit Card">💳 Card</option>
-                                                        <option value="Bank Transfer">🏦 Bank Transfer</option>
-                                                        <option value="Wallet">👛 Wallet</option>
-                                                        <option value="Cheque">📄 Cheque</option>
-                                                        <option value="Gift Voucher">🎁 Voucher</option>
-                                                        <option value="Store Credit">🏷️ Store Credit</option>
-                                                        {customerType === 'Borrow' && (
-                                                            <option value="Credit / Udhaar">🤝 Udhaar (Borrow Ledger)</option>
-                                                        )}
-                                                    </select>
+                                                    <div className="flex-1 min-w-[130px]">
+                                                        <CustomSelect
+                                                            value={row.paymentMethod}
+                                                            onChange={(val) => handlePaymentRowChange(row.id, 'paymentMethod', val)}
+                                                            options={[
+                                                                { value: 'Cash', label: '💵 Cash' },
+                                                                { value: 'UPI', label: '📱 UPI / QR Code' },
+                                                                { value: 'Credit/Debit Card', label: '💳 Card' },
+                                                                { value: 'Bank Transfer', label: '🏦 Bank Transfer' },
+                                                                { value: 'Wallet', label: '👛 Wallet' },
+                                                                { value: 'Cheque', label: '📄 Cheque' },
+                                                                { value: 'Gift Voucher', label: '🎁 Voucher' },
+                                                                { value: 'Store Credit', label: '🏷️ Store Credit' },
+                                                                ...(customerType === 'Borrow' ? [{ value: 'Credit / Udhaar', label: '🤝 Udhaar (Borrow Ledger)' }] : [])
+                                                            ]}
+                                                        />
+                                                    </div>
                                                 </div>
 
                                                 <div className="relative w-28 shrink-0">
@@ -1789,11 +1800,11 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                         <label className="text-[9px] font-black uppercase text-amber-900 dark:text-amber-200 tracking-wider block">
                                             Repayment Due Date (Optional)
                                         </label>
-                                        <input
-                                            type="date"
+                                        <CustomDatePicker
                                             value={dueDate}
-                                            onChange={(e) => setDueDate(e.target.value)}
-                                            className="w-full px-2 py-1.5 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-[#0d101a] text-amber-900 dark:text-amber-100 font-bold text-center cursor-pointer text-xs focus:ring-2 focus:ring-amber-500"
+                                            onChange={setDueDate}
+                                            color="amber"
+                                            placeholder="Select due date..."
                                         />
                                     </div>
 

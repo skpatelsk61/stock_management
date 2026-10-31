@@ -13,6 +13,7 @@ import {
   LockOpenIcon
 } from '@heroicons/react/24/outline';
 import { purchasesAPI } from '../../services/api';
+import CustomDatePicker from '../common/CustomDatePicker';
 
 const buildInitialItems = (items = []) => {
   return (items || []).map((item) => {
@@ -305,11 +306,11 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">GRN Receipt Date *</label>
-          <input
-            type="date"
+          <CustomDatePicker
             value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-600 mt-1 shadow-2xs"
+            onChange={(d) => setFormData({ ...formData, date: d })}
+            placeholder="dd-mm-yyyy"
+            color="blue"
           />
         </div>
       </div>
@@ -441,11 +442,11 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
                         Expiry Date
                       </label>
-                      <input
-                        type="date"
+                      <CustomDatePicker
                         value={item.expiry_date}
-                        onChange={(e) => handleItemChange(idx, 'expiry_date', e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded-xl px-2 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-600"
+                        onChange={(d) => handleItemChange(idx, 'expiry_date', d)}
+                        placeholder="dd-mm-yyyy"
+                        color="blue"
                       />
                     </div>
                   </div>

@@ -426,12 +426,24 @@ export const getInventoryReport = async (req, res, next) => {
     const params = [];
 
     if (categoryId && categoryId !== 'all') {
-      query += ` AND p.category_id = ?`;
-      params.push(Number(categoryId));
+      const catNum = Number(categoryId);
+      if (!isNaN(catNum) && catNum > 0) {
+        query += ` AND p.category_id = ?`;
+        params.push(catNum);
+      } else {
+        query += ` AND (c.name = ? OR p.category_id = ?)`;
+        params.push(String(categoryId), String(categoryId));
+      }
     }
     if (brandId && brandId !== 'all') {
-      query += ` AND p.brand_id = ?`;
-      params.push(Number(brandId));
+      const brandNum = Number(brandId);
+      if (!isNaN(brandNum) && brandNum > 0) {
+        query += ` AND (p.brand_id = ? OR p.brand = ?)`;
+        params.push(brandNum, String(brandId));
+      } else {
+        query += ` AND (b.name = ? OR p.brand = ? OR p.brand_id = ?)`;
+        params.push(String(brandId), String(brandId), String(brandId));
+      }
     }
     if (search) {
       query += ` AND (p.name LIKE ? OR p.barcode LIKE ?)`;
@@ -520,12 +532,24 @@ export const getPurchaseReport = async (req, res, next) => {
       filterParams.push(paymentStatus);
     }
     if (categoryId && categoryId !== 'all') {
-      baseFilter += ` AND pr.category_id = ?`;
-      filterParams.push(Number(categoryId));
+      const catNum = Number(categoryId);
+      if (!isNaN(catNum) && catNum > 0) {
+        baseFilter += ` AND pr.category_id = ?`;
+        filterParams.push(catNum);
+      } else {
+        baseFilter += ` AND (EXISTS (SELECT 1 FROM categories c_sub WHERE c_sub.id = pr.category_id AND c_sub.name = ?) OR pr.category_id = ?)`;
+        filterParams.push(String(categoryId), String(categoryId));
+      }
     }
     if (brandId && brandId !== 'all') {
-      baseFilter += ` AND (pr.brand = ? OR pr.brand_id = ?)`;
-      filterParams.push(brandId, isNaN(Number(brandId)) ? 0 : Number(brandId));
+      const brandNum = Number(brandId);
+      if (!isNaN(brandNum) && brandNum > 0) {
+        baseFilter += ` AND (pr.brand = ? OR pr.brand_id = ?)`;
+        filterParams.push(String(brandId), brandNum);
+      } else {
+        baseFilter += ` AND (pr.brand = ? OR pr.brand_id = ?)`;
+        filterParams.push(String(brandId), 0);
+      }
     }
     if (productId && productId !== 'all') {
       baseFilter += ` AND pi.product_id = ?`;
@@ -595,12 +619,24 @@ export const getPurchaseReport = async (req, res, next) => {
         WHERE pi_sub.purchase_id = p.id
       `;
       if (categoryId && categoryId !== 'all') {
-        summaryFilter += ` AND pr_sub.category_id = ?`;
-        summaryParams.push(Number(categoryId));
+        const catNum = Number(categoryId);
+        if (!isNaN(catNum) && catNum > 0) {
+          summaryFilter += ` AND pr_sub.category_id = ?`;
+          summaryParams.push(catNum);
+        } else {
+          summaryFilter += ` AND (EXISTS (SELECT 1 FROM categories c_sub WHERE c_sub.id = pr_sub.category_id AND c_sub.name = ?) OR pr_sub.category_id = ?)`;
+          summaryParams.push(String(categoryId), String(categoryId));
+        }
       }
       if (brandId && brandId !== 'all') {
-        summaryFilter += ` AND (pr_sub.brand = ? OR pr_sub.brand_id = ?)`;
-        summaryParams.push(brandId, isNaN(Number(brandId)) ? 0 : Number(brandId));
+        const brandNum = Number(brandId);
+        if (!isNaN(brandNum) && brandNum > 0) {
+          summaryFilter += ` AND (pr_sub.brand = ? OR pr_sub.brand_id = ?)`;
+          summaryParams.push(String(brandId), brandNum);
+        } else {
+          summaryFilter += ` AND (pr_sub.brand = ? OR pr_sub.brand_id = ?)`;
+          summaryParams.push(String(brandId), 0);
+        }
       }
       if (productId && productId !== 'all') {
         summaryFilter += ` AND pi_sub.product_id = ?`;
@@ -1025,58 +1061,82 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       logsParams.push(startDate + ' 00:00:00', endDate + ' 23:59:59');
     }
 
-    if (productId) {
-      salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub WHERE si_sub.sale_id = s.id AND si_sub.product_id = ?)';
-      salesParams.push(Number(productId));
+    if (productId && productId !== 'all') {
+      const pIdNum = Number(productId);
+      if (!isNaN(pIdNum) && pIdNum > 0) {
+        salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub WHERE si_sub.sale_id = s.id AND si_sub.product_id = ?)';
+        salesParams.push(pIdNum);
 
-      purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub WHERE pi_sub.purchase_id = p.id AND pi_sub.product_id = ?)';
-      purchParams.push(Number(productId));
+        purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub WHERE pi_sub.purchase_id = p.id AND pi_sub.product_id = ?)';
+        purchParams.push(pIdNum);
 
-      logsWhere += ' AND sl.product_id = ?';
-      logsParams.push(Number(productId));
+        logsWhere += ' AND sl.product_id = ?';
+        logsParams.push(pIdNum);
+      }
     }
 
-    if (categoryId) {
-      salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND pr_sub.category_id = ?)';
-      salesParams.push(Number(categoryId));
+    if (categoryId && categoryId !== 'all') {
+      const catNum = Number(categoryId);
+      if (!isNaN(catNum) && catNum > 0) {
+        salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND pr_sub.category_id = ?)';
+        salesParams.push(catNum);
 
-      purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND pr_sub.category_id = ?)';
-      purchParams.push(Number(categoryId));
+        purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND pr_sub.category_id = ?)';
+        purchParams.push(catNum);
 
-      logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND pr_sub.category_id = ?)';
-      logsParams.push(Number(categoryId));
+        logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND pr_sub.category_id = ?)';
+        logsParams.push(catNum);
+      } else {
+        salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND EXISTS (SELECT 1 FROM categories c_sub WHERE c_sub.id = pr_sub.category_id AND c_sub.name = ?))';
+        salesParams.push(String(categoryId));
+
+        purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND EXISTS (SELECT 1 FROM categories c_sub WHERE c_sub.id = pr_sub.category_id AND c_sub.name = ?))';
+        purchParams.push(String(categoryId));
+
+        logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND EXISTS (SELECT 1 FROM categories c_sub WHERE c_sub.id = pr_sub.category_id AND c_sub.name = ?))';
+        logsParams.push(String(categoryId));
+      }
     }
 
-    if (brand) {
+    if (brand && brand !== 'all') {
       salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
-      salesParams.push(brand, brand);
+      salesParams.push(brand, isNaN(Number(brand)) ? 0 : Number(brand));
 
       purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
-      purchParams.push(brand, brand);
+      purchParams.push(brand, isNaN(Number(brand)) ? 0 : Number(brand));
 
       logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
-      logsParams.push(brand, brand);
+      logsParams.push(brand, isNaN(Number(brand)) ? 0 : Number(brand));
     }
 
-    if (vendorId) {
-      purchWhere += ' AND p.vendor_id = ?';
-      purchParams.push(Number(vendorId));
+    if (vendorId && vendorId !== 'all') {
+      const vIdNum = Number(vendorId);
+      if (!isNaN(vIdNum) && vIdNum > 0) {
+        purchWhere += ' AND p.vendor_id = ?';
+        purchParams.push(vIdNum);
 
-      salesWhere += ' AND EXISTS (SELECT 1 FROM stock_logs sl_sub WHERE sl_sub.reference_no = s.invoice_no AND sl_sub.vendor_id = ?)';
-      salesParams.push(Number(vendorId));
+        salesWhere += ' AND EXISTS (SELECT 1 FROM stock_logs sl_sub WHERE sl_sub.reference_no = s.invoice_no AND sl_sub.vendor_id = ?)';
+        salesParams.push(vIdNum);
 
-      logsWhere += ' AND sl.vendor_id = ?';
-      logsParams.push(Number(vendorId));
+        logsWhere += ' AND sl.vendor_id = ?';
+        logsParams.push(vIdNum);
+      }
     }
 
-    if (customerId) {
-      salesWhere += ' AND s.customer_id = ?';
-      salesParams.push(Number(customerId));
+    if (customerId && customerId !== 'all') {
+      const cIdNum = Number(customerId);
+      if (!isNaN(cIdNum) && cIdNum > 0) {
+        salesWhere += ' AND s.customer_id = ?';
+        salesParams.push(cIdNum);
+      }
     }
 
-    if (employeeId) {
-      salesWhere += ' AND s.user_id = ?';
-      salesParams.push(Number(employeeId));
+    if (employeeId && employeeId !== 'all') {
+      const eIdNum = Number(employeeId);
+      if (!isNaN(eIdNum) && eIdNum > 0) {
+        salesWhere += ' AND s.user_id = ?';
+        salesParams.push(eIdNum);
+      }
     }
 
     // ── 1. KPI COUNTERS ────────────────────────────────────────────────────────

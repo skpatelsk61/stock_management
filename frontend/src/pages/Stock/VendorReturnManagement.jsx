@@ -21,6 +21,8 @@ import {
   PlusIcon
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import Loader from '../../components/common/Loader';
 import Modal from '../../components/common/Modal';
 import { useAppSelector } from '../../store/hooks';
@@ -1443,20 +1445,18 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                       <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
                         Select Purchase Invoice Reference ({purchasesForProduct.length} Available)
                       </label>
-                      <select
+                      <CustomSelect
                         value={selectedPurchase?.purchaseId || ''}
-                        onChange={(e) => {
-                          const found = purchasesForProduct.find((p) => p.purchaseId === Number(e.target.value));
+                        onChange={(val) => {
+                          const found = purchasesForProduct.find((p) => p.purchaseId === Number(val));
                           if (found) setSelectedPurchase(found);
                         }}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      >
-                        {purchasesForProduct.map((p, idx) => (
-                          <option key={`pur-ref-${p.purchaseId || p.id}-${p.batchNo || idx}`} value={p.purchaseId}>
-                            {p.purchaseNo} ({new Date(p.purchaseDate).toLocaleDateString('en-IN')}) • Qty: {p.purchaseQuantity} • Avail Return: {p.availableReturnQuantity} Pcs
-                          </option>
-                        ))}
-                      </select>
+                        color="blue"
+                        options={purchasesForProduct.map((p, idx) => ({
+                          value: p.purchaseId,
+                          label: `${p.purchaseNo} (${new Date(p.purchaseDate).toLocaleDateString('en-IN')}) • Qty: ${p.purchaseQuantity} • Avail Return: ${p.availableReturnQuantity} Pcs`
+                        }))}
+                      />
                     </div>
                   )}
 
@@ -1524,31 +1524,33 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
                     Reason for Return
                   </label>
-                  <select
+                  <CustomSelect
                     value={returnReason}
-                    onChange={(e) => setReturnReason(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="Damaged">Damaged Batch</option>
-                    <option value="Expired">Expired Stock</option>
-                    <option value="Defective">Defective Product</option>
-                    <option value="Overstock">Overstock Return</option>
-                    <option value="Wrong Item">Wrong Items Delivered</option>
-                  </select>
+                    onChange={setReturnReason}
+                    color="blue"
+                    options={[
+                      { value: 'Damaged', label: 'Damaged Batch' },
+                      { value: 'Expired', label: 'Expired Stock' },
+                      { value: 'Defective', label: 'Defective Product' },
+                      { value: 'Overstock', label: 'Overstock Return' },
+                      { value: 'Wrong Item', label: 'Wrong Items Delivered' }
+                    ]}
+                  />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
                     Settlement Type
                   </label>
-                  <select
+                  <CustomSelect
                     value={returnType}
-                    onChange={(e) => setReturnType(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="Refund">Refund / Store Credit</option>
-                    <option value="Replacement">Replacement Pending</option>
-                  </select>
+                    onChange={setReturnType}
+                    color="blue"
+                    options={[
+                      { value: 'Refund', label: 'Refund / Store Credit' },
+                      { value: 'Replacement', label: 'Replacement Pending' }
+                    ]}
+                  />
                 </div>
               </div>
 
@@ -1810,48 +1812,53 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
                 />
               </div>
               
-              <select
+              <CustomSelect
                 value={filterSupplier}
-                onChange={(e) => setFilterSupplier(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs focus:outline-none font-bold text-slate-900 dark:text-white"
-              >
-                <option value="All" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">All Suppliers</option>
-                {vendors.map((v, idx) => (
-                  <option key={`flt-v-${v.id}-${idx}`} value={v.id} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">{v.company_name || v.name}</option>
-                ))}
-              </select>
+                onChange={setFilterSupplier}
+                color="blue"
+                className="min-w-[170px]"
+                options={[
+                  { value: 'All', label: 'All Suppliers' },
+                  ...vendors.map((v) => ({
+                    value: v.id,
+                    label: v.company_name || v.name
+                  }))
+                ]}
+              />
 
-              <select
+              <CustomSelect
                 value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs focus:outline-none font-bold text-slate-900 dark:text-white"
-              >
-                <option value="All" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">All Statuses</option>
-                <option value="Pending" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Pending</option>
-                <option value="Sent to Vendor" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Sent to Vendor</option>
-                <option value="Vendor Accepted" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Vendor Accepted</option>
-                <option value="Replacement Received" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Replacement Received</option>
-                <option value="Refund Received" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Refund Received</option>
-                <option value="Closed" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Closed</option>
-              </select>
+                onChange={setFilterStatus}
+                color="blue"
+                className="min-w-[170px]"
+                options={[
+                  { value: 'All', label: 'All Statuses' },
+                  { value: 'Pending', label: 'Pending' },
+                  { value: 'Sent to Vendor', label: 'Sent to Vendor' },
+                  { value: 'Vendor Accepted', label: 'Vendor Accepted' },
+                  { value: 'Replacement Received', label: 'Replacement Received' },
+                  { value: 'Refund Received', label: 'Refund Received' },
+                  { value: 'Closed', label: 'Closed' }
+                ]}
+              />
 
-              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 min-w-[170px]">
                 <span className="text-[9px] font-extrabold text-slate-450 dark:text-slate-400 uppercase">From</span>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={filterDateFrom}
-                  onChange={(e) => setFilterDateFrom(e.target.value)}
-                  className="bg-transparent border-none text-xs focus:outline-none font-bold text-slate-700 dark:text-slate-200 w-full"
+                  onChange={setFilterDateFrom}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 min-w-[170px]">
                 <span className="text-[9px] font-extrabold text-slate-450 dark:text-slate-400 uppercase">To</span>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={filterDateTo}
-                  onChange={(e) => setFilterDateTo(e.target.value)}
-                  className="bg-transparent border-none text-xs focus:outline-none font-bold text-slate-700 dark:text-slate-200 w-full"
+                  onChange={setFilterDateTo}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
             </div>
@@ -2317,18 +2324,18 @@ const VendorReturnManagement = ({ onStockChanged, initialVendor = null, initialT
           <form onSubmit={handleUpdateStatusSubmit} className="p-4 space-y-4 font-sans text-xs">
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Select Workflow Status</label>
-              <select
+              <CustomSelect
                 value={statusUpdateVal}
-                onChange={(e) => setStatusUpdateVal(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-              >
-                <option value="Pending" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Pending</option>
-                <option value="Sent to Vendor" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Sent to Vendor</option>
-                <option value="Vendor Accepted" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Vendor Accepted</option>
-                <option value="Replacement Received" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Replacement Received</option>
-                <option value="Refund Received" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Refund Received</option>
-                <option value="Closed" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Closed</option>
-              </select>
+                onChange={setStatusUpdateVal}
+                color="blue"
+                options={[
+                  { value: 'Pending', label: 'Pending' },
+                  { value: 'Sent to Vendor', label: 'Sent to Vendor' },
+                  { value: 'Vendor Accepted', label: 'Vendor Accepted' },
+                  { value: 'Replacement Received', label: 'Replacement Received' },
+                  { value: 'Refund Received', label: 'Refund Received' }
+                ]}
+              />
             </div>
 
             <div>

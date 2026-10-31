@@ -25,6 +25,7 @@ import {
 import { notificationsAPI, settingsAPI } from '../../services/api';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Modal from '../../components/common/Modal';
+import CustomSelect from '../../components/common/CustomSelect';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { 
   showToast, 
@@ -549,37 +550,35 @@ const NotificationHistory = () => {
           {/* Module filter — options are role-aware, matching backend RBAC rules */}
           <div className="flex items-center gap-1.5">
             <FunnelIcon className="w-3.5 h-3.5 text-slate-500" />
-            <select
+            <CustomSelect
               value={moduleFilter}
-              onChange={(e) => {
-                setModuleFilter(e.target.value);
+              onChange={(val) => {
+                setModuleFilter(val);
                 setPage(1);
               }}
-              className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold bg-slate-50/70 dark:bg-slate-950 text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="all" className="bg-white dark:bg-slate-900">All Modules</option>
-              {moduleOptions.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-white dark:bg-slate-900">
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: 'all', label: 'All Modules' },
+                ...moduleOptions
+              ]}
+              className="min-w-[130px]"
+            />
           </div>
 
           {/* Priority filter */}
-          <select
+          <CustomSelect
             value={priorityFilter}
-            onChange={(e) => {
-              setPriorityFilter(e.target.value);
+            onChange={(val) => {
+              setPriorityFilter(val);
               setPage(1);
             }}
-            className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold bg-slate-50/70 dark:bg-slate-950 text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="all" className="bg-white dark:bg-slate-900">All Priorities</option>
-            <option value="High" className="bg-white dark:bg-slate-900">🔴 High Priority</option>
-            <option value="Medium" className="bg-white dark:bg-slate-900">🟡 Medium Priority</option>
-            <option value="Low" className="bg-white dark:bg-slate-900">🟢 Low Priority</option>
-          </select>
+            options={[
+              { value: 'all', label: 'All Priorities' },
+              { value: 'High', label: '🔴 High Priority' },
+              { value: 'Medium', label: '🟡 Medium Priority' },
+              { value: 'Low', label: '🟢 Low Priority' }
+            ]}
+            className="min-w-[130px]"
+          />
 
           {/* Mark All Read */}
           <button

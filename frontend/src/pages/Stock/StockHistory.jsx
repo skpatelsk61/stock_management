@@ -21,6 +21,8 @@ import {
 import { stockAPI, productsAPI, usersAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 import StatsCard from '../../components/common/StatsCard';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const StockHistory = () => {
   const { user } = useAppSelector((state) => state.auth);
@@ -565,48 +567,45 @@ const StockHistory = () => {
                 {/* Transaction Type */}
                 <div>
                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Transaction Type</label>
-                  <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                  >
-                    <option value="">All Types</option>
-                    <option value="Purchase">Purchase (Intake)</option>
-                    <option value="Sale">Sale (POS Check)</option>
-                    <option value="Return">Returns (Ledger)</option>
-                    <option value="Adjustment">Manual Adjustments</option>
-                  </select>
+                  <CustomSelect
+                value={filterType}
+                onChange={setFilterType}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Types' },
+                  { value: 'Increase', label: 'Stock In / Increase' },
+                  { value: 'Decrease', label: 'Stock Out / Decrease' }
+                ]}
+              />
                 </div>
 
                 {/* Operator Filter */}
                 <div>
                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Operator (User)</label>
-                  <select
+                  <CustomSelect
                     value={filterUser}
-                    onChange={(e) => setFilterUser(e.target.value)}
-                    className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                  >
-                    <option value="">All Staff</option>
-                    {usersList.map(u => (
-                      <option key={u.id} value={u.name}>{u.name}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setFilterUser(val)}
+                    options={[
+                      { value: '', label: 'All Staff' },
+                      ...usersList.map(u => ({ value: u.name, label: u.name }))
+                    ]}
+                  />
                 </div>
 
                 {/* Date presets */}
                 <div>
                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Date Range</label>
-                  <select
+                  <CustomSelect
                     value={filterDateRange}
-                    onChange={(e) => setFilterDateRange(e.target.value)}
-                    className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                  >
-                    <option value="all">Lifetime History</option>
-                    <option value="today">Today</option>
-                    <option value="week">This Week</option>
-                    <option value="month">This Month</option>
-                    <option value="custom">Custom Range</option>
-                  </select>
+                    onChange={(val) => setFilterDateRange(val)}
+                    options={[
+                      { value: 'all', label: 'Lifetime History' },
+                      { value: 'today', label: 'Today' },
+                      { value: 'week', label: 'This Week' },
+                      { value: 'month', label: 'This Month' },
+                      { value: 'custom', label: 'Custom Range' }
+                    ]}
+                  />
                 </div>
 
               </div>
@@ -620,20 +619,20 @@ const StockHistory = () => {
                 >
                   <div>
                     <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">From Date</label>
-                    <input
-                      type="date"
+                    <CustomDatePicker
                       value={filterDateFrom}
-                      onChange={(e) => setFilterDateFrom(e.target.value)}
-                      className="w-full px-2.5 py-1 text-[10px] border border-slate-200 rounded-lg text-slate-800"
+                      onChange={setFilterDateFrom}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">To Date</label>
-                    <input
-                      type="date"
+                    <CustomDatePicker
                       value={filterDateTo}
-                      onChange={(e) => setFilterDateTo(e.target.value)}
-                      className="w-full px-2.5 py-1 text-[10px] border border-slate-200 rounded-lg text-slate-800"
+                      onChange={setFilterDateTo}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                 </motion.div>

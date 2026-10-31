@@ -22,6 +22,7 @@ import StockAdjustment from './StockAdjustment';
 import StockDestroy from './StockDestroy';
 import PurchaseOrderList from '../Purchase/PurchaseOrderList';
 import Modal from '../../components/common/Modal';
+import CustomSelect from '../../components/common/CustomSelect';
 
 import StatsCard from '../../components/common/StatsCard';
 import { stockAPI } from '../../services/api';
@@ -584,16 +585,16 @@ const StockDashboard = () => {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <select
+                  <CustomSelect
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="bg-slate-50/50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 font-bold"
-                  >
-                    <option value="All">All Stock Statuses</option>
-                    <option value="In Stock">In Stock</option>
-                    <option value="Low Stock">Low Stock</option>
-                    <option value="Out Of Stock">Out Of Stock</option>
-                  </select>
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: "All", label: "All Stock Statuses" },
+                      { value: "In Stock", label: "In Stock" },
+                      { value: "Low Stock", label: "Low Stock" },
+                      { value: "Out Of Stock", label: "Out Of Stock" },
+                    ]}
+                  />
 
                   <button
                     onClick={toggleAllGroups}
@@ -826,20 +827,19 @@ const StockDashboard = () => {
                   <span className="text-xs font-black text-slate-700 whitespace-nowrap">
                     Select Weight:
                   </span>
-                  <select
-                    value={historyModal.selectedVariantId}
-                    onChange={(e) => setHistoryModal(prev => ({ ...prev, selectedVariantId: e.target.value }))}
-                    className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 shadow-2xs focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 cursor-pointer"
-                  >
-                    <option value="all">
-                      All Weights ({historyModal.variants.length} Pack Sizes)
-                    </option>
-                    {historyModal.variants.map((v) => (
-                      <option key={v.productId || v.id} value={String(v.productId || v.id)}>
-                        {v.measurement_value || v.unit} (Stock: {v.currentStock})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="w-64">
+                    <CustomSelect
+                      value={historyModal.selectedVariantId}
+                      onChange={(val) => setHistoryModal(prev => ({ ...prev, selectedVariantId: val }))}
+                      options={[
+                        { value: "all", label: `All Weights (${historyModal.variants.length} Pack Sizes)` },
+                        ...historyModal.variants.map((v) => ({
+                          value: String(v.productId || v.id),
+                          label: `${v.measurement_value || v.unit} (Stock: ${v.currentStock})`
+                        }))
+                      ]}
+                    />
+                  </div>
                 </div>
 
                 {/* Interactive Tab Buttons */}

@@ -25,6 +25,8 @@ import {
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
 import Modal from '../../components/common/Modal';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
+import CustomSelect from '../../components/common/CustomSelect';
 import { stockDestroyAPI, productsAPI, stockAPI } from '../../services/api';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { fetchStockSummary, fetchStockAlerts } from '../../store/slices/stockSlice';
@@ -342,8 +344,8 @@ const StockDestroy = ({ onStockChanged }) => {
   };
 
   // Handle Batch Selection
-  const handleBatchChange = (e) => {
-    const bId = e.target.value;
+  const handleBatchChange = (val) => {
+    const bId = (val && typeof val === 'object' && val.target) ? val.target.value : val;
     if (!bId) {
       setFormData(prev => ({
         ...prev,
@@ -668,11 +670,12 @@ const StockDestroy = ({ onStockChanged }) => {
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     Destroy Date
                   </label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     value={formData.destroyDate}
-                    onChange={(e) => setFormData(prev => ({ ...prev, destroyDate: e.target.value }))}
-                    className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-red-500"
+                    onChange={(d) => setFormData(prev => ({ ...prev, destroyDate: d }))}
+                    required={true}
+                    placeholder="Select destroy date..."
+                    color="red"
                   />
                 </div>
               </div>
@@ -1008,18 +1011,19 @@ const StockDestroy = ({ onStockChanged }) => {
                     <span>Batch / Lot Selection (FIFO)</span>
                     {loadingBatches && <span className="text-[10px] text-amber-500 animate-pulse">Loading batches...</span>}
                   </label>
-                  <select
+                  <CustomSelect
                     value={formData.batchId}
                     onChange={handleBatchChange}
-                    className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-red-500"
-                  >
-                    <option value="">-- All Batches (Auto FIFO Deduction) --</option>
-                    {availableBatches.map(b => (
-                      <option key={b.id} value={b.id}>
-                        Batch: {b.batch_number || 'DEFAULT'} | Rem: {b.remaining_quantity} | Cost: ₹{b.purchase_price || formData.purchasePrice} | Exp: {b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : 'N/A'}
-                      </option>
-                    ))}
-                  </select>
+                    color="red"
+                    placeholder="-- All Batches (Auto FIFO Deduction) --"
+                    options={[
+                      { value: '', label: '-- All Batches (Auto FIFO Deduction) --' },
+                      ...availableBatches.map(b => ({
+                        value: b.id,
+                        label: `Batch: ${b.batch_number || 'DEFAULT'} | Rem: ${b.remaining_quantity} | Cost: ₹${b.purchase_price || formData.purchasePrice} | Exp: ${b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : 'N/A'}`
+                      }))
+                    ]}
+                  />
                   {formData.batchAvailableStock !== null && (
                     <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
                       ✓ Selected Batch Remaining Stock: <strong>{formData.batchAvailableStock} {formData.unit}</strong> (Unit Cost: ₹{formData.unitCost})
@@ -1075,15 +1079,12 @@ const StockDestroy = ({ onStockChanged }) => {
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     Reason <span className="text-red-500">*</span>
                   </label>
-                  <select
+                  <CustomSelect
                     value={formData.reason}
-                    onChange={(e) => setFormData(prev => ({ ...prev, reason: e.target.value }))}
-                    className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-red-500"
-                  >
-                    {REASON_OPTIONS.map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setFormData(prev => ({ ...prev, reason: val }))}
+                    color="red"
+                    options={REASON_OPTIONS.map(r => ({ value: r, label: r }))}
+                  />
                 </div>
               </div>
 
@@ -1185,29 +1186,29 @@ const StockDestroy = ({ onStockChanged }) => {
               </div>
 
               <div>
-                <select
+                <CustomSelect
                   value={selectedReasonFilter}
-                  onChange={(e) => setSelectedReasonFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-gray-600"
-                >
-                  <option value="All">All Reasons</option>
-                  {REASON_OPTIONS.map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedReasonFilter}
+                  color="red"
+                  options={[
+                    { value: "All", label: "All Reasons" },
+                    ...REASON_OPTIONS.map(r => ({ value: r, label: r }))
+                  ]}
+                />
               </div>
 
               <div>
-                <select
+                <CustomSelect
                   value={selectedStatusFilter}
-                  onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-gray-600"
-                >
-                  <option value="All">All Statuses</option>
-                  <option value="Confirmed">Confirmed</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
+                  onChange={setSelectedStatusFilter}
+                  color="red"
+                  options={[
+                    { value: "All", label: "All Statuses" },
+                    { value: "Confirmed", label: "Confirmed" },
+                    { value: "Draft", label: "Draft" },
+                    { value: "Cancelled", label: "Cancelled" }
+                  ]}
+                />
               </div>
             </div>
 

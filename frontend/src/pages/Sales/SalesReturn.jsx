@@ -20,6 +20,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { salesReturnsAPI, productsAPI } from '../../services/api';
 import Modal from '../../components/common/Modal';
+import CustomSelect from '../../components/common/CustomSelect';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 import { fetchCustomers } from '../../store/slices/customerSlice';
@@ -703,15 +704,11 @@ const SalesReturn = () => {
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                       Return Reason <span className="text-rose-500">*</span>
                     </label>
-                    <select
+                    <CustomSelect
                       value={returnReason}
-                      onChange={(e) => setReturnReason(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer"
-                    >
-                      {returnReasonsList.map(r => (
-                        <option key={r} value={r} className="bg-white dark:bg-slate-900">{r}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => setReturnReason(val)}
+                      options={returnReasonsList.map(r => ({ value: r, label: r }))}
+                    />
                   </div>
 
                   {/* RETURN TYPE */}
@@ -719,15 +716,11 @@ const SalesReturn = () => {
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                       Return Type / Action Mode <span className="text-rose-500">*</span>
                     </label>
-                    <select
+                    <CustomSelect
                       value={returnType}
-                      onChange={(e) => setReturnType(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer"
-                    >
-                      {returnTypesList.map(t => (
-                        <option key={t} value={t} className="bg-white dark:bg-slate-900">{t}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => setReturnType(val)}
+                      options={returnTypesList.map(t => ({ value: t, label: t }))}
+                    />
                   </div>
 
                   {/* DYNAMIC FIELD: REFUND METHOD (Only for Walk-in or Fully Paid) */}
@@ -736,15 +729,11 @@ const SalesReturn = () => {
                       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Refund Payment Method <span className="text-rose-500">*</span>
                       </label>
-                      <select
+                      <CustomSelect
                         value={refundMethod}
-                        onChange={(e) => setRefundMethod(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer"
-                      >
-                        {refundMethodsList.map(m => (
-                          <option key={m} value={m} className="bg-white dark:bg-slate-900">{m}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setRefundMethod(val)}
+                        options={refundMethodsList.map(m => ({ value: m, label: m }))}
+                      />
                     </div>
                   )}
 
@@ -755,18 +744,17 @@ const SalesReturn = () => {
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                           Replacement Product
                         </label>
-                        <select
+                        <CustomSelect
                           value={replacementProductId}
-                          onChange={(e) => setReplacementProductId(e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer"
-                        >
-                          <option value="">Select Replacement Item...</option>
-                          {productsList.map(p => (
-                            <option key={p.id} value={p.id} className="bg-white dark:bg-slate-900">
-                              {p.name} — ₹{Number(p.selling_price || p.price || 0).toLocaleString('en-IN')}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => setReplacementProductId(val)}
+                          options={[
+                            { value: '', label: 'Select Replacement Item...' },
+                            ...productsList.map(p => ({
+                              value: p.id,
+                              label: `${p.name} — ₹${Number(p.selling_price || p.price || 0).toLocaleString('en-IN')}`
+                            }))
+                          ]}
+                        />
                       </div>
 
                       <div className="space-y-1.5">

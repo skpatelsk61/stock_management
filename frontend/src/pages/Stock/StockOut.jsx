@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { productsAPI, stockAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const StockOut = ({ onStockChanged }) => {
   const { user } = useAppSelector((state) => state.auth);
@@ -102,34 +103,33 @@ const StockOut = ({ onStockChanged }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Select Product</label>
-              <select
-                name="productId"
+              <CustomSelect
                 value={formData.productId}
-                onChange={handleChange}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-800 font-bold text-slate-900 dark:text-white"
-                required
-              >
-                <option value="">Choose item...</option>
-                {productList.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
-                ))}
-              </select>
+                onChange={(val) => setFormData(prev => ({ ...prev, productId: val }))}
+                color="blue"
+                placeholder="Choose item..."
+                options={[
+                  { value: '', label: 'Choose item...' },
+                  ...productList.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.sku})`
+                  }))
+                ]}
+              />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Warehouse Location</label>
-              <select
-                name="warehouseId"
+              <CustomSelect
                 value={formData.warehouseId}
-                onChange={handleChange}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-800 font-bold text-slate-900 dark:text-white"
-              >
-                <option value="1">Main Storage</option>
-                <option value="2">Retail Counter Shelf</option>
-                <option value="3">Cold Storage</option>
-              </select>
+                onChange={(val) => setFormData(prev => ({ ...prev, warehouseId: val }))}
+                color="blue"
+                options={[
+                  { value: '1', label: 'Main Storage' },
+                  { value: '2', label: 'Retail Counter Shelf' },
+                  { value: '3', label: 'Cold Storage' }
+                ]}
+              />
             </div>
 
             <div>

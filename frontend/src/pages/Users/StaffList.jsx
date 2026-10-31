@@ -20,6 +20,7 @@ import Modal from '../../components/common/Modal';
 import { validateEmailField } from '../../utils/validators';
 
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const PERMISSION_LABELS = {
   'view_dashboard': { label: 'View Dashboard Analytics', desc: 'Access high-level sales and inventory dashboard charts.' },
@@ -763,23 +764,23 @@ const StaffList = () => {
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                   />
                 ) : (
-                  <select
+                  <CustomSelect
                     value={formData.role_id}
-                    onChange={(e) => {
-                      const selRole = roles.find(r => r.id === Number(e.target.value));
+                    onChange={(val) => {
+                      const selRole = roles.find(r => r.id === Number(val));
                       setFormData({ 
                         ...formData, 
-                        role_id: e.target.value,
+                        role_id: val,
                         department: selRole?.name === 'Admin' ? '' : formData.department,
                         permission_ids: selRole?.name === 'Admin' ? [] : formData.permission_ids
                       });
                     }}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-600 dark:focus:border-emerald-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    {roles.map(role => (
-                      <option key={role.id} value={role.id}>{role.name}</option>
-                    ))}
-                  </select>
+                    color="blue"
+                    options={roles.map(role => ({
+                      value: role.id,
+                      label: role.name
+                    }))}
+                  />
                 )}
               </div>
 
@@ -793,15 +794,16 @@ const StaffList = () => {
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                   />
                 ) : (
-                  <select
+                  <CustomSelect
                     value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-600 dark:focus:border-emerald-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    <option value="">None / General</option>
-                    <option value="Sales">Sales</option>
-                    <option value="Purchase">Purchase</option>
-                  </select>
+                    onChange={(val) => setFormData({ ...formData, department: val })}
+                    color="blue"
+                    options={[
+                      { value: '', label: 'None / General' },
+                      { value: 'Sales', label: 'Sales' },
+                      { value: 'Purchase', label: 'Purchase' }
+                    ]}
+                  />
                 )}
               </div>
             </div>
@@ -809,14 +811,15 @@ const StaffList = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-1.5">Account Status</label>
-                <select
+                <CustomSelect
                   value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-600 dark:focus:border-emerald-500 font-bold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Suspended">Suspended</option>
-                </select>
+                  onChange={(val) => setFormData({ ...formData, status: val })}
+                  color="blue"
+                  options={[
+                    { value: 'Active', label: 'Active' },
+                    { value: 'Suspended', label: 'Suspended' }
+                  ]}
+                />
               </div>
             </div>
 
@@ -827,16 +830,17 @@ const StaffList = () => {
                   <label className="block text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-widest mb-1.5">
                     ⚙️ Employee Access Scope &amp; Dashboard View Dropdown
                   </label>
-                  <select
+                  <CustomSelect
                     value={accessPreset}
-                    onChange={(e) => applyAccessPreset(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-xs font-bold border border-emerald-300 dark:border-emerald-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white cursor-pointer shadow-sm"
-                  >
-                    <option value="sales">🛒 Sales &amp; POS Cashier Access (Routes to Sales Employee Dashboard)</option>
-                    <option value="purchase">📦 Purchase &amp; Stock Entry Access (Routes to Purchase Employee Dashboard)</option>
-                    <option value="operations">🏪 Full Store Operations Access (Sales + Purchase + Stock)</option>
-                    <option value="custom">⚙️ Custom Granular Matrix Permissions</option>
-                  </select>
+                    onChange={applyAccessPreset}
+                    color="blue"
+                    options={[
+                      { value: 'sales', label: '🛒 Sales & POS Cashier Access (Routes to Sales Employee Dashboard)' },
+                      { value: 'purchase', label: '📦 Purchase & Stock Entry Access (Routes to Purchase Employee Dashboard)' },
+                      { value: 'operations', label: '🏪 Full Store Operations Access (Sales + Purchase + Stock)' },
+                      { value: 'custom', label: '⚙️ Custom Granular Matrix Permissions' }
+                    ]}
+                  />
                   <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold mt-1">
                     {accessPreset === 'sales' && 'Assigns Point-of-Sale, checkout, and customer credit rights. Shows Sales Employee Dashboard.'}
                     {accessPreset === 'purchase' && 'Assigns Goods Receipt (GRN), supplier, and stock checkin rights. Shows Purchase Employee Dashboard.'}

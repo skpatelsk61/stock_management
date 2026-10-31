@@ -3,6 +3,28 @@
  * Standardized enterprise accounting and inventory valuation logic (SAP/Oracle/Odoo standard).
  */
 
+// Helper to safely format category & brand conditions without NaN
+const getCategoryCondition = (colName, categoryId) => {
+  if (!categoryId || categoryId === 'all') return { clause: '', params: [] };
+  const catNum = Number(categoryId);
+  if (!isNaN(catNum) && catNum > 0) {
+    return { clause: ` AND ${colName} = ?`, params: [catNum] };
+  }
+  return {
+    clause: ` AND ${colName} IN (SELECT id FROM categories WHERE name = ?)`,
+    params: [String(categoryId)]
+  };
+};
+
+const getBrandCondition = (brandCol, brandIdCol, brandVal) => {
+  if (!brandVal || brandVal === 'all') return { clause: '', params: [] };
+  const brandNum = Number(brandVal);
+  if (!isNaN(brandNum) && brandNum > 0) {
+    return { clause: ` AND (${brandCol} = ? OR ${brandIdCol} = ?)`, params: [String(brandVal), brandNum] };
+  }
+  return { clause: ` AND (${brandCol} = ? OR ${brandIdCol} = ?)`, params: [String(brandVal), 0] };
+};
+
 // Helper to build parameterized WHERE clause for filters
 const formatWhereClause = (tablePrefix = 's', filters = {}) => {
   const whereClauses = [];
@@ -27,16 +49,33 @@ const formatWhereClause = (tablePrefix = 's', filters = {}) => {
 
   // Category filter
   if (filters.categoryId && filters.categoryId !== 'all') {
-    const catId = Number(filters.categoryId);
+    const isNum = !isNaN(Number(filters.categoryId)) && Number(filters.categoryId) > 0;
+    const catNum = isNum ? Number(filters.categoryId) : null;
+    const catStr = String(filters.categoryId);
     if (tablePrefix === 's') {
-      whereClauses.push(`EXISTS (SELECT 1 FROM sale_items si_cat JOIN products pr_cat ON si_cat.product_id = pr_cat.id WHERE si_cat.sale_id = s.id AND pr_cat.category_id = ?)`);
-      params.push(catId);
+      if (isNum) {
+        whereClauses.push(`EXISTS (SELECT 1 FROM sale_items si_cat JOIN products pr_cat ON si_cat.product_id = pr_cat.id WHERE si_cat.sale_id = s.id AND pr_cat.category_id = ?)`);
+        params.push(catNum);
+      } else {
+        whereClauses.push(`EXISTS (SELECT 1 FROM sale_items si_cat JOIN products pr_cat ON si_cat.product_id = pr_cat.id JOIN categories c_cat ON pr_cat.category_id = c_cat.id WHERE si_cat.sale_id = s.id AND c_cat.name = ?)`);
+        params.push(catStr);
+      }
     } else if (tablePrefix === 'p') {
-      whereClauses.push(`EXISTS (SELECT 1 FROM purchase_items pi_cat JOIN products pr_cat ON pi_cat.product_id = pr_cat.id WHERE pi_cat.purchase_id = p.id AND pr_cat.category_id = ?)`);
-      params.push(catId);
+      if (isNum) {
+        whereClauses.push(`EXISTS (SELECT 1 FROM purchase_items pi_cat JOIN products pr_cat ON pi_cat.product_id = pr_cat.id WHERE pi_cat.purchase_id = p.id AND pr_cat.category_id = ?)`);
+        params.push(catNum);
+      } else {
+        whereClauses.push(`EXISTS (SELECT 1 FROM purchase_items pi_cat JOIN products pr_cat ON pi_cat.product_id = pr_cat.id JOIN categories c_cat ON pr_cat.category_id = c_cat.id WHERE pi_cat.purchase_id = p.id AND c_cat.name = ?)`);
+        params.push(catStr);
+      }
     } else if (tablePrefix === 'products' || tablePrefix === 'pr_catalog') {
-      whereClauses.push(`${tablePrefix}.category_id = ?`);
-      params.push(catId);
+      if (isNum) {
+        whereClauses.push(`${tablePrefix}.category_id = ?`);
+        params.push(catNum);
+      } else {
+        whereClauses.push(`${tablePrefix}.category_id IN (SELECT id FROM categories WHERE name = ?)`);
+        params.push(catStr);
+      }
     }
   }
 
@@ -108,8 +147,9 @@ export const calculateInventoryValuation = async (db, filters = {}) => {
   const batchParams = [];
   const bVal = filters.brandId || filters.brand;
   if (filters.categoryId && filters.categoryId !== 'all') {
-    batchQuery += ` AND p.category_id = ?`;
-    batchParams.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    batchQuery += cond.clause;
+    batchParams.push(...cond.params);
   }
   if (bVal && bVal !== 'all') {
     batchQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
@@ -133,8 +173,9 @@ export const calculateInventoryValuation = async (db, filters = {}) => {
   `;
   const fallbackParams = [];
   if (filters.categoryId && filters.categoryId !== 'all') {
-    fallbackQuery += ` AND p.category_id = ?`;
-    fallbackParams.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    fallbackQuery += cond.clause;
+    fallbackParams.push(...cond.params);
   }
   if (bVal && bVal !== 'all') {
     fallbackQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
@@ -293,8 +334,9 @@ export const calculateCOGS = async (db, filters = {}) => {
 
   const bValCogs = filters.brandId || filters.brand;
   if (filters.categoryId && filters.categoryId !== 'all') {
-    cogsQuery += ` AND p.category_id = ?`;
-    cogsParams.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    cogsQuery += cond.clause;
+    cogsParams.push(...cond.params);
   }
   if (bValCogs && bValCogs !== 'all') {
     cogsQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
@@ -358,8 +400,9 @@ export const calculateMarginBreakdown = async (db, filters = {}) => {
 
   const bValCogs = filters.brandId || filters.brand;
   if (filters.categoryId && filters.categoryId !== 'all') {
-    query += ` AND p.category_id = ?`;
-    params.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    query += cond.clause;
+    params.push(...cond.params);
   }
   if (bValCogs && bValCogs !== 'all') {
     query += ` AND (p.brand = ? OR p.brand_id = ?)`;
@@ -486,14 +529,11 @@ export const calculateStockCounts = async (db, filters = {}) => {
   `;
   const params = [];
   if (filters.categoryId && filters.categoryId !== 'all') {
-    lowStockQuery += ` AND p.category_id = ?`;
-    params.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    lowStockQuery += cond.clause;
+    params.push(...cond.params);
   }
   const bValStock = filters.brandId || filters.brand;
-  if (filters.categoryId && filters.categoryId !== 'all') {
-    lowStockQuery += ` AND p.category_id = ?`;
-    params.push(Number(filters.categoryId));
-  }
   if (bValStock && bValStock !== 'all') {
     lowStockQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
     params.push(bValStock, isNaN(Number(bValStock)) ? 0 : Number(bValStock));
@@ -515,8 +555,9 @@ export const calculateStockCounts = async (db, filters = {}) => {
   `;
   const outParams = [];
   if (filters.categoryId && filters.categoryId !== 'all') {
-    outStockQuery += ` AND p.category_id = ?`;
-    outParams.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('p.category_id', filters.categoryId);
+    outStockQuery += cond.clause;
+    outParams.push(...cond.params);
   }
   if (bValStock && bValStock !== 'all') {
     outStockQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
@@ -555,12 +596,14 @@ export const getTopSellingProducts = async (db, filters = {}, limit = 10) => {
   query += clause;
 
   if (filters.categoryId && filters.categoryId !== 'all') {
-    query += ` AND pr.category_id = ?`;
-    params.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('pr.category_id', filters.categoryId);
+    query += cond.clause;
+    params.push(...cond.params);
   }
   if (filters.brandId && filters.brandId !== 'all') {
-    query += ` AND pr.brand_id = ?`;
-    params.push(Number(filters.brandId));
+    const cond = getBrandCondition('pr.brand', 'pr.brand_id', filters.brandId);
+    query += cond.clause;
+    params.push(...cond.params);
   }
 
   query += ` GROUP BY pr.id HAVING revenue > 0 ORDER BY revenue DESC LIMIT ?`;
@@ -587,12 +630,14 @@ export const getTopPurchasedProducts = async (db, filters = {}, limit = 10) => {
   query += clause;
 
   if (filters.categoryId && filters.categoryId !== 'all') {
-    query += ` AND pr.category_id = ?`;
-    params.push(Number(filters.categoryId));
+    const cond = getCategoryCondition('pr.category_id', filters.categoryId);
+    query += cond.clause;
+    params.push(...cond.params);
   }
   if (filters.brandId && filters.brandId !== 'all') {
-    query += ` AND pr.brand_id = ?`;
-    params.push(Number(filters.brandId));
+    const cond = getBrandCondition('pr.brand', 'pr.brand_id', filters.brandId);
+    query += cond.clause;
+    params.push(...cond.params);
   }
 
   query += ` GROUP BY pr.id HAVING total_expenses > 0 ORDER BY total_expenses DESC LIMIT ?`;
@@ -853,12 +898,14 @@ export const calculateStockAging = async (db, filters = {}) => {
     `;
     const params = [];
     if (filters.categoryId && filters.categoryId !== 'all') {
-      query += ` AND p.category_id = ?`;
-      params.push(Number(filters.categoryId));
+      const cond = getCategoryCondition('p.category_id', filters.categoryId);
+      query += cond.clause;
+      params.push(...cond.params);
     }
     if (filters.brandId && filters.brandId !== 'all') {
-      query += ` AND p.brand_id = ?`;
-      params.push(Number(filters.brandId));
+      const cond = getBrandCondition('p.brand', 'p.brand_id', filters.brandId);
+      query += cond.clause;
+      params.push(...cond.params);
     }
 
     const [rows] = await db.query(query, params);
@@ -1043,12 +1090,14 @@ export const calculateBatchValuationReport = async (db, filters = {}) => {
     const params = [];
 
     if (filters.categoryId && filters.categoryId !== 'all') {
-      query += ` AND pr.category_id = ?`;
-      params.push(Number(filters.categoryId));
+      const cond = getCategoryCondition('pr.category_id', filters.categoryId);
+      query += cond.clause;
+      params.push(...cond.params);
     }
     if (filters.brandId && filters.brandId !== 'all') {
-      query += ` AND pr.brand_id = ?`;
-      params.push(Number(filters.brandId));
+      const cond = getBrandCondition('pr.brand', 'pr.brand_id', filters.brandId);
+      query += cond.clause;
+      params.push(...cond.params);
     }
     if (filters.search) {
       query += ` AND (pr.name LIKE ? OR pb.batch_number LIKE ?)`;
