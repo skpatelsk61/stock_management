@@ -19,6 +19,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { usersAPI, activityLogsAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 
 const ActivityLogs = () => {
   const { user } = useAppSelector((state) => state.auth);
@@ -268,85 +270,88 @@ const ActivityLogs = () => {
             {/* Operator User */}
             <div>
               <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">Operator (User)</label>
-              <select
+              <CustomSelect
                 value={filterUser}
-                onChange={(e) => setFilterUser(e.target.value)}
-                className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                <option value="">All Users</option>
-                {usersList.map(u => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
+                onChange={setFilterUser}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Users' },
+                  ...usersList.map(u => ({ value: u.id, label: u.name }))
+                ]}
+              />
             </div>
 
             {/* Operator Role */}
             <div>
               <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">Operator Role</label>
-              <select
+              <CustomSelect
                 value={filterRole}
-                onChange={(e) => setFilterRole(e.target.value)}
-                className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                <option value="">All Roles</option>
-                <option value="Super Admin">Super Admin</option>
-                <option value="Admin">Admin</option>
-                <option value="Sales Manager">Sales Manager</option>
-                <option value="Purchase Manager">Purchase Manager</option>
-                <option value="Employee">Employee</option>
-              </select>
+                onChange={setFilterRole}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Roles' },
+                  { value: 'Super Admin', label: 'Super Admin' },
+                  { value: 'Admin', label: 'Admin' },
+                  { value: 'Sales Manager', label: 'Sales Manager' },
+                  { value: 'Purchase Manager', label: 'Purchase Manager' },
+                  { value: 'Employee', label: 'Employee' }
+                ]}
+              />
             </div>
 
             {/* Module Name */}
             <div>
               <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">ERP Module</label>
-              <select
+              <CustomSelect
                 value={filterModule}
-                onChange={(e) => setFilterModule(e.target.value)}
-                className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                <option value="">All Modules</option>
-                <option value="Auth">Auth & Logins</option>
-                <option value="Products">Products Master</option>
-                <option value="Categories">Categories Master</option>
-                <option value="Vendors">Supplier Master</option>
-                <option value="Stock">Stock & Adjustments</option>
-                <option value="Purchase">Purchases Intake</option>
-                <option value="Sales">Sales (POS Check)</option>
-                <option value="Users">Staff / Employee</option>
-                <option value="Billing">Subscription</option>
-                <option value="Settings">System Settings</option>
-              </select>
+                onChange={setFilterModule}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Modules' },
+                  { value: 'Auth', label: 'Auth & Logins' },
+                  { value: 'Products', label: 'Products Master' },
+                  { value: 'Categories', label: 'Categories Master' },
+                  { value: 'Vendors', label: 'Supplier Master' },
+                  { value: 'Stock', label: 'Stock & Adjustments' },
+                  { value: 'Purchase', label: 'Purchases Intake' },
+                  { value: 'Sales', label: 'Sales (POS Check)' },
+                  { value: 'Users', label: 'Staff / Employee' },
+                  { value: 'Billing', label: 'Subscription' },
+                  { value: 'Settings', label: 'System Settings' }
+                ]}
+              />
             </div>
 
             {/* Status */}
             <div>
               <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">Status</label>
-              <select
+              <CustomSelect
                 value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                <option value="">All Statuses</option>
-                <option value="Success">Success</option>
-                <option value="Failed">Failed</option>
-              </select>
+                onChange={setFilterStatus}
+                color="blue"
+                options={[
+                  { value: '', label: 'All Statuses' },
+                  { value: 'Success', label: 'Success' },
+                  { value: 'Failed', label: 'Failed' }
+                ]}
+              />
             </div>
 
             {/* Date range selection */}
             <div>
               <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">Date Filter</label>
-              <select
+              <CustomSelect
                 value={filterDateRange}
-                onChange={(e) => setFilterDateRange(e.target.value)}
-                className="w-full px-2 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                <option value="all">Lifetime Audit</option>
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="custom">Custom Date</option>
-              </select>
+                onChange={setFilterDateRange}
+                color="blue"
+                options={[
+                  { value: 'all', label: 'Lifetime Audit' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'week', label: 'This Week' },
+                  { value: 'month', label: 'This Month' },
+                  { value: 'custom', label: 'Custom Date' }
+                ]}
+              />
             </div>
 
           </div>
@@ -360,20 +365,20 @@ const ActivityLogs = () => {
             >
               <div>
                 <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">From Date</label>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={filterDateFrom}
-                  onChange={(e) => setFilterDateFrom(e.target.value)}
-                  className="w-full px-2.5 py-1 text-[10px] border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-emerald-600"
+                  onChange={setFilterDateFrom}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
               <div>
                 <label className="block text-[8px] font-black text-slate-400 uppercase mb-0.5">To Date</label>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={filterDateTo}
-                  onChange={(e) => setFilterDateTo(e.target.value)}
-                  className="w-full px-2.5 py-1 text-[10px] border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-emerald-600"
+                  onChange={setFilterDateTo}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
             </motion.div>

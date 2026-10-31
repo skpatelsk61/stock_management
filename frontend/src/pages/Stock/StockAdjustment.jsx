@@ -22,6 +22,8 @@ import {
 import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import StatsCard from '../../components/common/StatsCard';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const INCREASE_REASONS = [
   'Physical Count Difference',
@@ -434,9 +436,10 @@ const StockAdjustment = ({ onStockChanged }) => {
   };
 
   // Handle Batch Selection Change
-  const handleBatchSelectChange = (e) => {
-    const val = e.target.value;
-    if (val === 'NEW_BATCH') {
+  const handleBatchSelectChange = (val) => {
+    const batchVal = (val && typeof val === 'object' && val.target) ? val.target.value : val;
+    const valClean = batchVal;
+    if (valClean === 'NEW_BATCH') {
       setBatchMode('new');
       setFormData(prev => ({
         ...prev,
@@ -445,7 +448,7 @@ const StockAdjustment = ({ onStockChanged }) => {
       }));
       return;
     }
-    const found = productBatches.find(b => String(b.id) === String(val));
+    const found = productBatches.find(b => String(b.id) === String(valClean));
     if (found) {
       setBatchMode('existing');
       setFormData(prev => ({
@@ -1283,15 +1286,18 @@ const StockAdjustment = ({ onStockChanged }) => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Adjustment Type *</label>
-                  <select
-                    name="type"
+                  <CustomSelect
                     value={formData.type}
-                    onChange={handleInputChange}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white"
-                  >
-                    <option value="Increase">Increase (+)</option>
-                    <option value="Decrease">Decrease (-)</option>
-                  </select>
+                    onChange={(val) => {
+                      const defaultReason = val === 'Increase' ? INCREASE_REASONS[0] : DECREASE_REASONS[0];
+                      setFormData((prev) => ({ ...prev, type: val, reason: defaultReason }));
+                    }}
+                    color="blue"
+                    options={[
+                      { value: 'Increase', label: 'Increase (+)' },
+                      { value: 'Decrease', label: 'Decrease (-)' }
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Adjustment Qty *</label>
@@ -1311,16 +1317,15 @@ const StockAdjustment = ({ onStockChanged }) => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Reason *</label>
-                  <select
-                    name="reason"
+                  <CustomSelect
                     value={formData.reason}
-                    onChange={handleInputChange}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white"
-                  >
-                    {(formData.type === 'Increase' ? INCREASE_REASONS : DECREASE_REASONS).map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setFormData((prev) => ({ ...prev, reason: val }))}
+                    color="blue"
+                    options={(formData.type === 'Increase' ? INCREASE_REASONS : DECREASE_REASONS).map(r => ({
+                      value: r,
+                      label: r
+                    }))}
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">New Stock Preview</label>
@@ -1465,20 +1470,20 @@ const StockAdjustment = ({ onStockChanged }) => {
                       Batch {loadingBatches && <span className="animate-spin inline-block text-[10px]">⌛</span>}
                     </label>
                     {batchMode === 'existing' && productBatches.length > 0 ? (
-                      <select
-                        name="batchId"
+                      <CustomSelect
                         value={formData.batchId || ''}
                         onChange={handleBatchSelectChange}
-                        className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:border-indigo-500 bg-white dark:bg-slate-900 font-mono text-slate-900 dark:text-white"
-                      >
-                        <option value="">-- Select Batch --</option>
-                        {productBatches.map(b => (
-                          <option key={b.id} value={b.id}>
-                            {b.batch_number} (Rem: {b.remaining_quantity})
-                          </option>
-                        ))}
-                        <option value="NEW_BATCH">+ Enter Custom Batch...</option>
-                      </select>
+                        color="blue"
+                        placeholder="-- Select Batch --"
+                        options={[
+                          { value: '', label: '-- Select Batch --' },
+                          ...productBatches.map(b => ({
+                            value: b.id,
+                            label: `${b.batch_number} (Rem: ${b.remaining_quantity})`
+                          })),
+                          { value: 'NEW_BATCH', label: '+ Enter Custom Batch...' }
+                        ]}
+                      />
                     ) : (
                       <input 
                         type="text"
@@ -1492,22 +1497,20 @@ const StockAdjustment = ({ onStockChanged }) => {
                   </div>
                   <div>
                     <label className="block text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-0.5">Mfg Date</label>
-                    <input 
-                      type="date"
-                      name="mfgDate"
+                    <CustomDatePicker
                       value={formData.mfgDate}
-                      onChange={handleInputChange}
-                      className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 font-medium"
+                      onChange={(d) => setFormData((prev) => ({ ...prev, mfgDate: d }))}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                   <div>
                     <label className="block text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-0.5">Expiry Date</label>
-                    <input 
-                      type="date"
-                      name="expDate"
+                    <CustomDatePicker
                       value={formData.expDate}
-                      onChange={handleInputChange}
-                      className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 font-medium"
+                      onChange={(d) => setFormData((prev) => ({ ...prev, expDate: d }))}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                 </div>
@@ -1599,61 +1602,60 @@ const StockAdjustment = ({ onStockChanged }) => {
               </div>
               <div>
                 <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Adjust Type</label>
-                <select
+                <CustomSelect
                   value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
-                >
-                  <option value="">All Types</option>
-                  <option value="Increase">Increase (+)</option>
-                  <option value="Decrease">Decrease (-)</option>
-                </select>
+                  onChange={setFilterType}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Types' },
+                    { value: 'Increase', label: 'Increase (+)' },
+                    { value: 'Decrease', label: 'Decrease (-)' }
+                  ]}
+                />
               </div>
               <div>
                 <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Reason</label>
-                <select
+                <CustomSelect
                   value={filterReason}
-                  onChange={(e) => setFilterReason(e.target.value)}
-                  className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
-                >
-                  <option value="">All Reasons</option>
-                  {ALL_REASONS.map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
+                  onChange={setFilterReason}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Reasons' },
+                    ...ALL_REASONS.map(r => ({ value: r, label: r }))
+                  ]}
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Adjusted By</label>
-                <select
+                <CustomSelect
                   value={filterAdjustedBy}
-                  onChange={(e) => setFilterAdjustedBy(e.target.value)}
-                  className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
-                >
-                  <option value="">All Operators</option>
-                  {uniqueUsers.map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
+                  onChange={setFilterAdjustedBy}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Operators' },
+                    ...uniqueUsers.map(u => ({ value: u, label: u }))
+                  ]}
+                />
               </div>
               <div>
                 <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Date From</label>
-                <input 
-                  type="date"
+                <CustomDatePicker
                   value={filterDateFrom}
-                  onChange={(e) => setFilterDateFrom(e.target.value)}
-                  className="w-full px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
+                  onChange={setFilterDateFrom}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
               <div>
                 <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Date To</label>
-                <input 
-                  type="date"
+                <CustomDatePicker
                   value={filterDateTo}
-                  onChange={(e) => setFilterDateTo(e.target.value)}
-                  className="w-full px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
+                  onChange={setFilterDateTo}
+                  placeholder="dd-mm-yyyy"
+                  color="blue"
                 />
               </div>
             </div>

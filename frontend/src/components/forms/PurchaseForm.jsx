@@ -23,6 +23,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { vendorsAPI, productsAPI, categoriesAPI } from '../../services/api';
 import PurchaseInvoicePrintTemplate from '../common/PurchaseInvoicePrintTemplate';
+import CustomSelect from '../common/CustomSelect';
+import CustomDatePicker from '../common/CustomDatePicker';
 
 // ── Helper to normalise a product object from API (snake_case or camelCase)
 const normProduct = (p) => ({
@@ -623,9 +625,9 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
         )}
 
         {/* SECTION 1 – SUPPLIER + METADATA */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
           {/* section header */}
-          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-3 flex items-center gap-2.5">
+          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-3 flex items-center gap-2.5 rounded-t-2xl">
             <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
               <BuildingStorefrontIcon className="w-4 h-4 text-white" />
             </div>
@@ -636,11 +638,19 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
             {/* Supplier Name */}
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Supplier Name *</label>
-              <select name="vendor" value={formData.vendor} onChange={handleChange} disabled={!!purchaseOrder}
-                className={`w-full px-3 py-2.5 text-xs border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-semibold transition-all ${errors.vendor ? 'border-rose-400 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-800'}`}>
-                <option value="">— Select Vendor Supplier —</option>
-                {dbVendors.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-              </select>
+              <CustomSelect
+                value={formData.vendor}
+                onChange={(val) => {
+                  handleChange({ target: { name: 'vendor', value: val } });
+                }}
+                disabled={!!purchaseOrder}
+                color="blue"
+                placeholder="— Select Vendor Supplier —"
+                options={[
+                  { value: '', label: '— Select Vendor Supplier —' },
+                  ...dbVendors.map((v) => ({ value: v.name, label: v.name }))
+                ]}
+              />
               {errors.vendor && <p className="text-[10px] font-bold text-rose-600 mt-1">⚠ {errors.vendor}</p>}
             </div>
 
@@ -655,15 +665,23 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
             {/* Billing Date */}
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Billing Date *</label>
-              <input type="date" name="purchaseDate" value={formData.purchaseDate} onChange={handleChange}
-                className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-semibold text-slate-700" />
+              <CustomDatePicker
+                value={formData.purchaseDate}
+                onChange={(d) => handleChange({ target: { name: 'purchaseDate', value: d } })}
+                placeholder="dd-mm-yyyy"
+                color="blue"
+              />
             </div>
 
             {/* Due Date */}
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Due Date</label>
-              <input type="date" name="dueDate" value={formData.dueDate || ''} onChange={handleChange}
-                className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-semibold text-slate-700" />
+              <CustomDatePicker
+                value={formData.dueDate || ''}
+                onChange={(d) => handleChange({ target: { name: 'dueDate', value: d } })}
+                placeholder="dd-mm-yyyy"
+                color="blue"
+              />
             </div>
 
             {/* Supplier Phone */}
@@ -684,8 +702,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
 
         {/* SECTION 2 – PRODUCT QUICK ENTRY */}
         {!purchaseOrder && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-5 py-3 flex items-center gap-2.5">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-5 py-3 flex items-center gap-2.5 rounded-t-2xl">
               <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
                 <ShoppingBagIcon className="w-4 h-4 text-white" />
               </div>
@@ -696,61 +714,41 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                 {/* Category select */}
                 <div className="md:col-span-3">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Product Category</label>
-                  <select
+                  <CustomSelect
                     value={selectedCategory}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                    className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-semibold text-slate-700 cursor-pointer"
-                  >
-                    <option value="">— All Categories —</option>
-                    {dbCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={handleCategoryChange}
+                    color="blue"
+                    placeholder="— All Categories —"
+                    options={[
+                      { value: '', label: '— All Categories —' },
+                      ...dbCategories.map((c) => ({ value: c.id, label: c.name }))
+                    ]}
+                  />
                 </div>
 
                 {/* Product select */}
                 <div className="md:col-span-3">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Select Catalog Item</label>
-                  <select value={selectedProduct}
-                    onChange={(e) => {
-                      setSelectedProduct(e.target.value);
-                      const prod = dbProducts.find((p) => String(p.id) === String(e.target.value));
+                  <CustomSelect
+                    value={selectedProduct}
+                    onChange={(val) => {
+                      setSelectedProduct(val);
+                      const prod = dbProducts.find((p) => String(p.id) === String(val));
                       if (prod) {
                         setCustomPrice(prod.purchasePrice > 0 ? prod.purchasePrice : '');
                         setItemGst(prod.gst || 18);
                       }
                     }}
-                    className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-semibold text-slate-700 cursor-pointer">
-                    <option value="">
-                      {selectedCategory && filteredProducts.length === 0
-                        ? '— No Products in Category —'
-                        : '— Choose Catalog Product —'}
-                    </option>
-                    {groupedProducts.map((grp) => {
-                      const hasMultiple = grp.variants.length > 1;
-                      return (
-                        <optgroup 
-                          key={grp.key} 
-                          label={hasMultiple ? `📁 ${grp.displayName} (${grp.variants.length} Weights)` : `📦 ${grp.displayName}`}
-                        >
-                          {grp.variants.map((v, idx) => {
-                            const isLast = idx === grp.variants.length - 1;
-                            const treeSymbol = hasMultiple ? (isLast ? '└── ' : '├── ') : '└── ';
-                            const weightLabel = v.measurement_value || v.unit || 'Standard';
-                            const stockNum = Number(v.total_stock || 0);
-                            const stockTag = stockNum <= 0 ? ' [Out of Stock]' : ` (Stock: ${stockNum})`;
-                            return (
-                              <option key={v.id} value={v.id}>
-                                {`${treeSymbol}${grp.displayName} — Weight: ${weightLabel}${stockTag}`}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      );
-                    })}
-                  </select>
+                    color="blue"
+                    placeholder={selectedCategory && filteredProducts.length === 0 ? '— No Products in Category —' : '— Choose Catalog Product —'}
+                    options={[
+                      { value: '', label: selectedCategory && filteredProducts.length === 0 ? '— No Products in Category —' : '— Choose Catalog Product —' },
+                      ...filteredProducts.map((p) => ({
+                        value: p.id,
+                        label: `${p.name}${p.brand ? ` (${p.brand})` : ''}${p.measurement_value ? ` [${p.measurement_value}]` : ''} — MRP: ₹${p.purchasePrice || 0}`
+                      }))
+                    ]}
+                  />
                 </div>
 
                 {/* Qty */}
@@ -781,10 +779,12 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                 {/* GST % */}
                 <div className="md:col-span-1">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">GST %</label>
-                  <select value={itemGst} onChange={(e) => setItemGst(Number(e.target.value))}
-                    className="w-full px-2 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-bold text-xs">
-                    {GST_OPTS.map((g) => <option key={g} value={g}>{g}%</option>)}
-                  </select>
+                  <CustomSelect
+                    value={itemGst}
+                    onChange={(val) => setItemGst(Number(val))}
+                    color="blue"
+                    options={GST_OPTS.map((g) => ({ value: g, label: `${g}%` }))}
+                  />
                 </div>
 
                 {/* Disc % */}
@@ -1041,13 +1041,17 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                 {/* Payment mode */}
                 <div className="col-span-2">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Payment Mode</label>
-                  <select name="paymentMode" value={formData.paymentMode} onChange={handleChange}
-                    className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 bg-slate-50 font-bold">
-                    <option value="Cash">💵 Cash Transaction</option>
-                    <option value="UPI">📱 UPI / Digital Wallet</option>
-                    <option value="Bank Transfer">🏦 Bank Transfer / NEFT</option>
-                    <option value="Credit">📋 Credit / Accounts Payable</option>
-                  </select>
+                  <CustomSelect
+                    value={formData.paymentMode}
+                    onChange={(val) => handleChange({ target: { name: 'paymentMode', value: val } })}
+                    color="blue"
+                    options={[
+                      { value: 'Cash', label: '💵 Cash Transaction' },
+                      { value: 'UPI', label: '📱 UPI / Digital Wallet' },
+                      { value: 'Bank Transfer', label: '🏦 Bank Transfer / NEFT' },
+                      { value: 'Credit', label: '📋 Credit / Accounts Payable' }
+                    ]}
+                  />
                 </div>
 
                 {/* Transport */}

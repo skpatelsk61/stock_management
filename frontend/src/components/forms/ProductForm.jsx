@@ -9,6 +9,7 @@ import {
   PlusCircleIcon
 } from '@heroicons/react/24/outline';
 import { categoriesAPI, subCategoriesAPI, brandsAPI } from '../../services/api';
+import CustomSelect from '../common/CustomSelect';
 
 const UNIT_SUFFIX_MAP = {
   'Kg': 'kg',
@@ -335,6 +336,10 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
     setErrors({});
   }, [product, dbCategories, dbSubCategories, dbBrands]);
 
+  const handleSelectField = (name, value) => {
+    handleChange({ target: { name, value } });
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     
@@ -560,25 +565,25 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
                   Unit (Measurement Parameter) <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  name="unit"
+                <CustomSelect
                   value={formData.unit}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-bold text-slate-800 dark:text-slate-205 outline-none cursor-pointer"
-                >
-                  <option value="Packet">Packet</option>
-                  <option value="Bottle">Bottle</option>
-                  <option value="Box">Box</option>
-                  <option value="Kg">Kg (Kilogram)</option>
-                  <option value="Grams">Grams (g)</option>
-                  <option value="Litre">Litre (L)</option>
-                  <option value="Ml">Ml (Millilitre)</option>
-                  <option value="Sachet">Sachet</option>
-                  <option value="Piece">Piece / Pcs</option>
-                  <option value="Carton">Carton</option>
-                  <option value="Dozen">Dozen</option>
-                  <option value="Meter">Meter</option>
-                </select>
+                  onChange={(val) => handleSelectField('unit', val)}
+                  color="blue"
+                  options={[
+                    { value: 'Packet', label: 'Packet' },
+                    { value: 'Bottle', label: 'Bottle' },
+                    { value: 'Box', label: 'Box' },
+                    { value: 'Kg', label: 'Kg (Kilogram)' },
+                    { value: 'Grams', label: 'Grams (g)' },
+                    { value: 'Litre', label: 'Litre (L)' },
+                    { value: 'Ml', label: 'Ml (Millilitre)' },
+                    { value: 'Sachet', label: 'Sachet' },
+                    { value: 'Piece', label: 'Piece / Pcs' },
+                    { value: 'Carton', label: 'Carton' },
+                    { value: 'Dozen', label: 'Dozen' },
+                    { value: 'Meter', label: 'Meter' }
+                  ]}
+                />
               </div>
 
               {/* Weight / Size (Multi-select dropdown with checkboxes + custom option) */}
@@ -597,18 +602,18 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 {/* Dropdown Trigger Box */}
                 <div
                   onClick={() => setIsWeightDropdownOpen((prev) => !prev)}
-                  className="w-full min-h-[38px] px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between cursor-pointer hover:border-emerald-500 transition-all focus:border-emerald-500"
+                  className={`w-full min-h-[38px] px-3 py-1.5 text-xs border rounded-xl bg-white dark:bg-[#0d1117] flex items-center justify-between cursor-pointer transition-all duration-150 select-none ` + (isWeightDropdownOpen ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm' : 'border-slate-200 dark:border-slate-700 hover:border-emerald-400 dark:hover:border-emerald-600 hover:shadow-sm')}
                 >
-                  <div className="flex flex-wrap gap-1 items-center flex-1 pr-2">
+                  <div className="flex flex-wrap gap-1 items-center flex-1 pr-2 min-h-[22px]">
                     {selectedWeights.length === 0 ? (
-                      <span className="text-slate-400 font-semibold">
-                        Select {formData.unit} weight(s) or add custom...
+                      <span className="text-slate-400 dark:text-slate-500 font-medium text-[11px]">
+                        Click to select {formData.unit} weight(s)...
                       </span>
                     ) : (
                       selectedWeights.map((w) => (
                         <span
                           key={w}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-xs"
+                          className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-xs"
                         >
                           {w}
                           <span
@@ -616,7 +621,7 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                               e.stopPropagation();
                               handleToggleWeight(w);
                             }}
-                            className="hover:text-rose-600 dark:hover:text-rose-400 text-xs font-black cursor-pointer ml-0.5 px-0.5"
+                            className="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-rose-500 hover:text-white text-slate-400 dark:text-slate-500 font-black cursor-pointer transition-colors text-[10px] leading-none"
                             title="Remove weight"
                           >
                             ×
@@ -625,56 +630,72 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                       ))
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 text-slate-400 select-none">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                  <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 rounded-md">
                       {formData.unit}
                     </span>
-                    <span className={`text-[10px] transition-transform duration-200 ${isWeightDropdownOpen ? 'rotate-180' : ''}`}>
-                      ▼
-                    </span>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform duration-200 ${isWeightDropdownOpen ? "rotate-180 !text-emerald-500" : ""}`}>
+                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06z" clipRule="evenodd" />
+                    </svg>
                   </div>
                 </div>
 
                 {/* Dropdown Menu */}
                 {isWeightDropdownOpen && (
-                  <div className="absolute z-50 left-0 right-0 mt-1 p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-h-72 overflow-y-auto">
-                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 dark:border-slate-800">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Pre-defined {formData.unit} Weights
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-400">
-                        Check to select / Uncheck to remove
+                  <div className="agy-dropdown-panel absolute z-50 left-0 right-0 mt-1.5 overflow-hidden">
+
+                    {/* Panel Header */}
+                    <div className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-900/80 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                          {formData.unit} Weights
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 italic">
+                        Tap to toggle
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2.5">
+                    {/* Weight Pills Grid */}
+                    <div className="p-2.5 grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-52 overflow-y-auto custom-scrollbar">
                       {allAvailableWeights.map((w) => {
                         const isChecked = selectedWeights.includes(w);
                         const isCustom = !baseOptions.includes(w);
                         return (
                           <label
                             key={w}
-                            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border select-none ${
+                            className={`group relative flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all border select-none ${
                               isChecked
-                                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 shadow-xs'
-                                : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                ? "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-600 text-emerald-800 dark:text-emerald-300 shadow-sm ring-1 ring-emerald-300/60 dark:ring-emerald-700/60"
+                                : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30"
                             }`}
                           >
-                            <div className="flex items-center gap-2 truncate">
+                            <div className="flex items-center gap-1.5 truncate min-w-0">
+                              {/* Custom checkbox */}
+                              <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                isChecked ? "bg-emerald-500 border-emerald-500" : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                              }`}>
+                                {isChecked && (
+                                  <svg viewBox="0 0 10 8" className="w-2 h-2 text-white" fill="currentColor">
+                                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                                  </svg>
+                                )}
+                              </div>
                               <input
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => handleToggleWeight(w)}
-                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                                className="sr-only"
                               />
-                              <span className="truncate">{w}</span>
+                              <span className="truncate font-semibold">{w}</span>
                             </div>
                             {isCustom && (
                               <button
                                 type="button"
                                 onClick={(e) => handleDeleteCustomWeight(e, w)}
                                 title="Remove custom weight"
-                                className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-0.5 rounded text-[11px] leading-none ml-1 cursor-pointer font-bold"
+                                className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded-full hover:bg-rose-100 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-all cursor-pointer font-bold text-[11px] ml-0.5 flex-shrink-0"
                               >
                                 ×
                               </button>
@@ -684,39 +705,40 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                       })}
                     </div>
 
-                    {/* Custom Weight / Size input inside dropdown */}
-                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-                        + Custom Weight / Size:
+                    {/* Custom Weight Input */}
+                    <div className="px-2.5 pb-2.5 border-t border-slate-100 dark:border-slate-800 pt-2 bg-slate-50/50 dark:bg-slate-900/50">
+                      <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 flex items-center gap-1">
+                        <span>✦</span> Add Custom Size
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 overflow-hidden focus-within:border-emerald-500">
+                        <div className="flex-1 flex rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
                           <input
                             type="text"
                             value={customWeightInput}
                             onChange={(e) => setCustomWeightInput(e.target.value)}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === "Enter") {
                                 e.preventDefault();
                                 handleAddCustomWeight();
                               }
                             }}
-                            placeholder="Enter value (e.g. 15)"
-                            className="w-full px-3 py-1.5 text-xs bg-transparent font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
+                            placeholder="e.g. 750, 1.5, 200..."
+                            className="w-full px-2.5 py-1.5 text-xs bg-transparent font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 outline-none"
                           />
-                          <div className="flex items-center px-2.5 bg-slate-100 dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-500 select-none">
+                          <div className="flex items-center px-2 bg-slate-50 dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 select-none whitespace-nowrap">
                             {UNIT_SUFFIX_MAP[formData.unit] || formData.unit}
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={handleAddCustomWeight}
-                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer whitespace-nowrap flex items-center gap-1"
                         >
-                          + Add
+                          <span className="text-sm leading-none">+</span> Add
                         </button>
                       </div>
                     </div>
+
                   </div>
                 )}
 
@@ -779,18 +801,16 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
                   Main Category <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  name="category_id"
+                <CustomSelect
                   value={formData.category_id || (selectedCatObj ? selectedCatObj.id : '')}
-                  onChange={handleChange}
-                  disabled={loadingMasters}
-                  className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 outline-none cursor-pointer disabled:opacity-50 ${errors.category ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200 dark:border-slate-850'}`}
-                >
-                  <option value="">Select Main Category</option>
-                  {dbCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
+                  onChange={(val) => handleSelectField('category_id', val)}
+                  color="blue"
+                  placeholder="Select Main Category"
+                  options={[
+                    { value: '', label: 'Select Main Category' },
+                    ...dbCategories.map((cat) => ({ value: cat.id, label: cat.name }))
+                  ]}
+                />
                 {errors.category && <p className="text-[10px] font-bold text-rose-600 mt-1">{errors.category}</p>}
               </div>
 
@@ -799,29 +819,30 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
                   Sub Category
                 </label>
-                <select
-                  name="sub_category_id"
+                <CustomSelect
                   value={isCustomSubCategory ? 'Custom' : (formData.sub_category_id || (dbSubCategories.find(s => s.name === formData.sub_category)?.id || ''))}
-                  onChange={handleChange}
-                  disabled={!formData.category_id && !formData.category}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 outline-none disabled:opacity-50 cursor-pointer"
-                >
-                  {!formData.category_id && !formData.category ? (
-                    <option value="">Select Main Category First</option>
-                  ) : activeSubCategories.length === 0 ? (
-                    <option value="" disabled>No Sub Categories Available</option>
-                  ) : (
-                    <option value="">Select Sub Category</option>
-                  )}
-                  
-                  {activeSubCategories.map((sub) => (
-                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                  ))}
-                  
-                  {(formData.category_id || formData.category) && (
-                    <option value="Custom">+ Add Custom Sub Category...</option>
-                  )}
-                </select>
+                  onChange={(val) => handleSelectField('sub_category_id', val)}
+                  color="blue"
+                  placeholder={
+                    !formData.category_id && !formData.category
+                      ? 'Select Main Category First'
+                      : activeSubCategories.length === 0
+                      ? 'No Sub Categories Available'
+                      : 'Select Sub Category'
+                  }
+                  options={[
+                    { 
+                      value: '', 
+                      label: !formData.category_id && !formData.category 
+                        ? 'Select Main Category First' 
+                        : activeSubCategories.length === 0 
+                        ? 'No Sub Categories Available' 
+                        : 'Select Sub Category' 
+                    },
+                    ...activeSubCategories.map((sub) => ({ value: sub.id, label: sub.name })),
+                    ...((formData.category_id || formData.category) ? [{ value: 'Custom', label: '+ Add Custom Sub Category...' }] : [])
+                  ]}
+                />
 
                 {isCustomSubCategory && (
                   <input
@@ -840,29 +861,34 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
                   Brand Name <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  name="brand_select"
+                <CustomSelect
                   value={isCustomBrand ? 'Custom' : (formData.brand_id || (dbBrands.find(b => b.name === formData.brand)?.id || ''))}
-                  onChange={handleChange}
-                  disabled={loadingMasters || (!formData.category_id && !formData.category)}
-                  className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 outline-none cursor-pointer disabled:opacity-50 ${errors.brand ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200 dark:border-slate-850'}`}
-                >
-                  {!formData.category_id && !formData.category ? (
-                    <option value="">Select Main Category First</option>
-                  ) : !formData.sub_category_id && !formData.sub_category ? (
-                    <option value="">Select Sub Category First</option>
-                  ) : activeBrands.length === 0 ? (
-                    <option value="" disabled>No Brands Available for this Sub Category</option>
-                  ) : (
-                    <option value="">Select Brand</option>
-                  )}
-                  {activeBrands.map((br) => (
-                    <option key={br.id} value={br.id}>{br.name}</option>
-                  ))}
-                  {(formData.category_id || formData.category) && (
-                    <option value="Custom">+ Add Custom Brand...</option>
-                  )}
-                </select>
+                  onChange={(val) => handleSelectField('brand_select', val)}
+                  color="blue"
+                  placeholder={
+                    !formData.category_id && !formData.category
+                      ? 'Select Main Category First'
+                      : !formData.sub_category_id && !formData.sub_category
+                      ? 'Select Sub Category First'
+                      : activeBrands.length === 0
+                      ? 'No Brands Available for this Sub Category'
+                      : 'Select Brand'
+                  }
+                  options={[
+                    { 
+                      value: '', 
+                      label: !formData.category_id && !formData.category 
+                        ? 'Select Main Category First' 
+                        : !formData.sub_category_id && !formData.sub_category 
+                        ? 'Select Sub Category First' 
+                        : activeBrands.length === 0 
+                        ? 'No Brands Available for this Sub Category' 
+                        : 'Select Brand' 
+                    },
+                    ...activeBrands.map((br) => ({ value: br.id, label: br.name })),
+                    ...((formData.category_id || formData.category) ? [{ value: 'Custom', label: '+ Add Custom Brand...' }] : [])
+                  ]}
+                />
                 {errors.brand && <p className="text-[10px] font-bold text-rose-600 mt-1">{errors.brand}</p>}
 
                 {isCustomBrand && (
@@ -974,18 +1000,18 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 <label className="block text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest mb-1">
                   GST Rate (%)
                 </label>
-                <select
-                  name="gst"
+                <CustomSelect
                   value={formData.gst}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-mono font-bold text-slate-800 dark:text-slate-100 outline-none cursor-pointer"
-                >
-                  <option value="0">0% (Exempted)</option>
-                  <option value="5">5% (Essential)</option>
-                  <option value="12">12% (Standard 1)</option>
-                  <option value="18">18% (Standard 2)</option>
-                  <option value="28">28% (Luxury)</option>
-                </select>
+                  onChange={(val) => handleSelectField('gst', val)}
+                  color="blue"
+                  options={[
+                    { value: '0', label: '0% (Exempted)' },
+                    { value: '5', label: '5% (Essential)' },
+                    { value: '12', label: '12% (Standard 1)' },
+                    { value: '18', label: '18% (Standard 2)' },
+                    { value: '28', label: '28% (Luxury)' }
+                  ]}
+                />
                 <p className="text-[9px] text-slate-400 mt-1">Applicable GST tax bracket</p>
               </div>
             </div>

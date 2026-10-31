@@ -30,6 +30,8 @@ import Modal from '../../components/common/Modal';
 import VendorForm from '../../components/forms/VendorForm';
 
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import { vendorsAPI, purchasesAPI, purchaseOrdersAPI, vendorReturnsAPI } from '../../services/api';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
@@ -852,16 +854,17 @@ const VendorList = ({ defaultView = 'list' }) => {
                 />
               </div>
 
-              <div>
-                <select
+              <div className="min-w-[140px]">
+                <CustomSelect
                   value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-600 bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
+                  onChange={setFilterStatus}
+                  color="blue"
+                  options={[
+                    { value: '', label: 'All Statuses' },
+                    { value: 'Active', label: 'Active' },
+                    { value: 'Inactive', label: 'Inactive' }
+                  ]}
+                />
               </div>
             </div>
 
@@ -1414,19 +1417,23 @@ const VendorList = ({ defaultView = 'list' }) => {
                       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Statement Date Filter:</span>
-                          <input
-                            type="date"
-                            value={dateFromFilter}
-                            onChange={(e) => setDateFromFilter(e.target.value)}
-                            className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-white"
-                          />
+                          <div className="w-36">
+                            <CustomDatePicker
+                              value={dateFromFilter}
+                              onChange={setDateFromFilter}
+                              placeholder="dd-mm-yyyy"
+                              color="blue"
+                            />
+                          </div>
                           <span className="text-xs font-bold text-slate-400">to</span>
-                          <input
-                            type="date"
-                            value={dateToFilter}
-                            onChange={(e) => setDateToFilter(e.target.value)}
-                            className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-white"
-                          />
+                          <div className="w-36">
+                            <CustomDatePicker
+                              value={dateToFilter}
+                              onChange={setDateToFilter}
+                              placeholder="dd-mm-yyyy"
+                              color="blue"
+                            />
+                          </div>
                         </div>
                         {(dateFromFilter || dateToFilter) && (
                           <button
@@ -1799,12 +1806,12 @@ const VendorList = ({ defaultView = 'list' }) => {
                     <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                       Payment Date <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="date"
-                      required
+                    <CustomDatePicker
                       value={paymentForm.payment_date}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_date: e.target.value }))}
-                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs"
+                      onChange={(d) => setPaymentForm(prev => ({ ...prev, payment_date: d }))}
+                      required={true}
+                      placeholder="dd-mm-yyyy"
+                      color="blue"
                     />
                   </div>
                 </div>
@@ -1815,19 +1822,20 @@ const VendorList = ({ defaultView = 'list' }) => {
                     <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                       Payment Method <span className="text-rose-500">*</span>
                     </label>
-                    <select
+                    <CustomSelect
                       value={paymentForm.payment_mode}
-                      onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_mode: e.target.value }))}
-                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-indigo-600 cursor-pointer shadow-2xs"
-                    >
-                      <option value="Cash">💵 Cash</option>
-                      <option value="UPI">📱 UPI / QR Code</option>
-                      <option value="Bank Transfer">🏦 Bank Transfer</option>
-                      <option value="Cheque">📜 Cheque</option>
-                      <option value="NEFT/RTGS">⚡ NEFT / RTGS</option>
-                      <option value="Journal Adjustment">⚖️ Journal Adjustment</option>
-                      <option value="Other">📑 Other</option>
-                    </select>
+                      onChange={(val) => setPaymentForm(prev => ({ ...prev, payment_mode: val }))}
+                      color="blue"
+                      options={[
+                        { value: 'Cash', label: '💵 Cash' },
+                        { value: 'UPI', label: '📱 UPI / QR Code' },
+                        { value: 'Bank Transfer', label: '🏦 Bank Transfer' },
+                        { value: 'Cheque', label: '📜 Cheque' },
+                        { value: 'NEFT/RTGS', label: '⚡ NEFT / RTGS' },
+                        { value: 'Journal Adjustment', label: '⚖️ Journal Adjustment' },
+                        { value: 'Other', label: '📑 Other' }
+                      ]}
+                    />
                   </div>
 
                   <div>
@@ -1841,10 +1849,9 @@ const VendorList = ({ defaultView = 'list' }) => {
                         </span>
                       )}
                     </div>
-                    <select
+                    <CustomSelect
                       value={paymentForm.purchase_id}
-                      onChange={(e) => {
-                        const pid = e.target.value;
+                      onChange={(pid) => {
                         setPaymentForm(prev => ({ ...prev, purchase_id: pid }));
                         if (pid && paymentInvoices.length > 0) {
                           const inv = paymentInvoices.find(i => String(i.id) === String(pid));
@@ -1853,15 +1860,16 @@ const VendorList = ({ defaultView = 'list' }) => {
                           }
                         }
                       }}
-                      className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600 shadow-2xs cursor-pointer truncate"
-                    >
-                      <option value="">⚡ General Account (Auto-allocate FIFO)</option>
-                      {paymentInvoices.filter(i => i.payment_status !== 'Paid').map(inv => (
-                        <option key={inv.id} value={inv.id}>
-                          Bill #{inv.purchase_no} — ₹{Number(inv.total).toLocaleString('en-IN')} (Due: ₹{Number(inv.due_amount || inv.total).toLocaleString('en-IN')})
-                        </option>
-                      ))}
-                    </select>
+                      color="blue"
+                      placeholder="Select Purchase Bill..."
+                      options={[
+                        { value: '', label: 'None (Direct Advance / Open On-Account Payment)' },
+                        ...paymentInvoices.map(inv => ({
+                          value: inv.id,
+                          label: `${inv.purchase_no} (${new Date(inv.purchase_date).toLocaleDateString()}) — Due: ₹${Number(inv.due_amount || 0).toFixed(2)} [Total: ₹${Number(inv.grand_total || 0).toFixed(2)}]`
+                        }))
+                      ]}
+                    />
                   </div>
                 </div>
 
@@ -2067,39 +2075,38 @@ const VendorList = ({ defaultView = 'list' }) => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
               <div>
                 <span className="text-[10px] font-black text-slate-400 uppercase block">Supplier Name</span>
-                <select
+                <CustomSelect
                   value={returnVendorObj?.id || ''}
-                  onChange={(e) => {
-                    const found = vendors.find(v => String(v.id) === String(e.target.value));
+                  onChange={(val) => {
+                    const found = vendors.find(v => String(v.id) === String(val));
                     if (found) {
                       setReturnVendorObj(found);
                       loadVendorInvoicesForReturn(found.id);
                     }
                   }}
-                  className="w-full mt-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer"
-                >
-                  {vendors.map(v => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} ({v.company_name || 'Supplier'})
-                    </option>
-                  ))}
-                </select>
+                  color="blue"
+                  options={vendors.map(v => ({
+                    value: v.id,
+                    label: `${v.name} (${v.company_name || 'Supplier'})`
+                  }))}
+                />
               </div>
 
               <div>
                 <span className="text-[10px] font-black text-slate-400 uppercase block">Purchase Invoice</span>
-                <select
+                <CustomSelect
                   value={selectedPurchaseId}
-                  onChange={(e) => handlePurchaseInvoiceChange(e.target.value)}
-                  className="w-full mt-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer"
-                >
-                  <option value="">Select Invoice...</option>
-                  {vendorInvoices.map(inv => (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.purchase_no} — ₹{Number(inv.total).toLocaleString('en-IN')} ({new Date(inv.date).toLocaleDateString('en-IN')})
-                    </option>
-                  ))}
-                </select>
+                  onChange={handlePurchaseInvoiceChange}
+                  color="blue"
+                  placeholder="Select Invoice..."
+                  options={[
+                    { value: '', label: 'Select Invoice...' },
+                    ...vendorInvoices.map(inv => ({
+                      value: inv.id,
+                      label: `${inv.purchase_no} (${new Date(inv.purchase_date).toLocaleDateString()}) • Total: ₹${Number(inv.grand_total).toFixed(2)}`
+                    }))
+                  ]}
+                />
               </div>
 
               <div>
@@ -2208,34 +2215,36 @@ const VendorList = ({ defaultView = 'list' }) => {
                 <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                   Return Reason <span className="text-rose-500">*</span>
                 </label>
-                <select
+                <CustomSelect
                   value={returnReason}
-                  onChange={(e) => setReturnReason(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer"
-                >
-                  <option value="Damaged Goods">Damaged Goods</option>
-                  <option value="Wrong Product Received">Wrong Product Received</option>
-                  <option value="Wrong Quantity Received">Wrong Quantity Received</option>
-                  <option value="Product Not Required">Product Not Required</option>
-                  <option value="Quality Issue">Quality Issue</option>
-                  <option value="Partial Return">Partial Return</option>
-                  <option value="Expired Item">Expired Item</option>
-                  <option value="Other">Other</option>
-                </select>
+                  onChange={setReturnReason}
+                  color="blue"
+                  options={[
+                    { value: 'Damaged Goods', label: 'Damaged Goods' },
+                    { value: 'Wrong Product Received', label: 'Wrong Product Received' },
+                    { value: 'Wrong Quantity Received', label: 'Wrong Quantity Received' },
+                    { value: 'Product Not Required', label: 'Product Not Required' },
+                    { value: 'Quality Issue', label: 'Quality Issue' },
+                    { value: 'Partial Return', label: 'Partial Return' },
+                    { value: 'Expired Item', label: 'Expired Item' },
+                    { value: 'Other', label: 'Other' }
+                  ]}
+                />
               </div>
 
               <div>
                 <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                   Return Type / Settlement
                 </label>
-                <select
+                <CustomSelect
                   value={returnType}
-                  onChange={(e) => setReturnType(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer"
-                >
-                  <option value="Refund">Refund / Reduce Outstanding Payable</option>
-                  <option value="Replacement">Replacement Item from Supplier</option>
-                </select>
+                  onChange={setReturnType}
+                  color="blue"
+                  options={[
+                    { value: 'Refund', label: 'Refund / Reduce Outstanding Payable' },
+                    { value: 'Replacement', label: 'Replacement Item from Supplier' }
+                  ]}
+                />
               </div>
             </div>
 

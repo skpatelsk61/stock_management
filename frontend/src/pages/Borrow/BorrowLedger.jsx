@@ -25,6 +25,8 @@ import {
 import API, { settingsAPI } from '../../services/api';
 import Loader from '../../components/common/Loader';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import CustomSelect from '../../components/common/CustomSelect';
+import CustomDatePicker from '../../components/common/CustomDatePicker';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 
@@ -828,15 +830,17 @@ const BorrowLedger = () => {
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
             <span className="text-[10px] font-bold text-slate-400 uppercase">Sort by:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-3 py-1.5 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600"
-            >
-              <option value="dueDesc">Highest Dues First</option>
-              <option value="advanceDesc">Highest Advance Jama First</option>
-              <option value="nameAsc">Customer Name (A-Z)</option>
-            </select>
+            <div className="w-56">
+              <CustomSelect
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { value: "dueDesc", label: "Highest Dues First" },
+                  { value: "advanceDesc", label: "Highest Advance Jama First" },
+                  { value: "nameAsc", label: "Customer Name (A-Z)" },
+                ]}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -996,7 +1000,7 @@ const BorrowLedger = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden my-8"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
             >
               {/* Modal Header */}
               <div className="bg-slate-950 px-6 py-4 flex items-center justify-between text-white border-b border-slate-800">
@@ -1016,26 +1020,24 @@ const BorrowLedger = () => {
                 </button>
               </div>
 
-              <form onSubmit={handleTxSubmit} className="p-6 space-y-4">
+              <form onSubmit={handleTxSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                 {/* Customer Picker if opened generally */}
                 {!selectedCustomer && (
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                       Select Customer *
                     </label>
-                    <select
+                    <CustomSelect
                       value={txForm.customer_id}
-                      onChange={(e) => setTxForm({ ...txForm, customer_id: e.target.value })}
-                      required
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:border-emerald-600"
-                    >
-                      <option value="">Select customer account...</option>
-                      {summary.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.phone || 'No Mobile'}) — Due: ₹{Number(c.outstanding_balance || c.balance || 0).toFixed(2)} | Jama: ₹{Number(c.advance_balance || 0).toFixed(2)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setTxForm({ ...txForm, customer_id: val })}
+                      searchable={true}
+                      searchPlaceholder="Search customer by name or phone..."
+                      placeholder="Select customer account..."
+                      options={summary.map((c) => ({
+                        value: String(c.id),
+                        label: `${c.name} (${c.phone || "No Mobile"}) — Due: ₹${Number(c.outstanding_balance || c.balance || 0).toFixed(2)} | Jama: ₹${Number(c.advance_balance || 0).toFixed(2)}`
+                      }))}
+                    />
                   </div>
                 )}
 
@@ -1158,12 +1160,11 @@ const BorrowLedger = () => {
                     <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                       Transaction Date *
                     </label>
-                    <input
-                      type="date"
-                      required
+                    <CustomDatePicker
                       value={txForm.date}
-                      onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:border-emerald-600"
+                      onChange={(d) => setTxForm({ ...txForm, date: d })}
+                      required={true}
+                      placeholder="Select transaction date..."
                     />
                   </div>
 
@@ -1172,12 +1173,11 @@ const BorrowLedger = () => {
                       <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                         Due Date (बकाया तिथि) *
                       </label>
-                      <input
-                        type="date"
-                        required
+                      <CustomDatePicker
                         value={txForm.due_date}
-                        onChange={(e) => setTxForm({ ...txForm, due_date: e.target.value })}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:border-emerald-600"
+                        onChange={(d) => setTxForm({ ...txForm, due_date: d })}
+                        required={true}
+                        placeholder="Select due date..."
                       />
                     </div>
                   )}

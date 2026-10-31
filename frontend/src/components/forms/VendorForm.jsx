@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { validateEmailField } from '../../utils/validators';
+import CustomSelect from '../common/CustomSelect';
 
 const VendorForm = ({ vendor, onSubmit, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -461,15 +462,15 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
           </div>
           <div>
             <label className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Supplier Status</label>
-            <select
-              name="status"
+            <CustomSelect
               value={formData.status}
-              onChange={handleChange}
-              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-emerald-600 dark:focus:border-emerald-500 bg-slate-50/60 dark:bg-slate-950/50 font-bold text-slate-800 dark:text-white"
-            >
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-            </select>
+              onChange={(val) => setFormData(prev => ({ ...prev, status: val }))}
+              color="blue"
+              options={[
+                { value: 'Active', label: 'Active' },
+                { value: 'Inactive', label: 'Inactive' }
+              ]}
+            />
           </div>
         </div>
       </div>

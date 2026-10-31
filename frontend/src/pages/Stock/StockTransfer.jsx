@@ -18,6 +18,7 @@ import {
   PlusIcon
 } from '@heroicons/react/24/outline';
 import StatsCard from '../../components/common/StatsCard';
+import CustomSelect from '../../components/common/CustomSelect';
 import Modal from '../../components/common/Modal';
 import { stockAPI, stockDestroyAPI, productsAPI } from '../../services/api';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -707,33 +708,29 @@ const StockTransfer = ({ onStockChanged }) => {
 
                   {toWarehouseMode === 'existing' ? (
                     <>
-                      <select
+                      <CustomSelect
                         value={formData.toWarehouseId}
-                        onChange={(e) => {
-                          if (e.target.value === '__add_new__') {
+                        onChange={(val) => {
+                          if (val === '__add_new__') {
                             setAddWhModalOpen(true);
                             setWhError('');
                             setNewWhName('');
                             setNewWhLocation('');
                             return;
                           }
-                          setFormData(prev => ({ ...prev, toWarehouseId: e.target.value }));
+                          setFormData(prev => ({ ...prev, toWarehouseId: val }));
                           setFormErrors(prev => ({ ...prev, toWarehouseId: null }));
                         }}
-                        className={`w-full px-2.5 py-2 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border ${
-                          formErrors.toWarehouseId ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
-                        } focus:ring-2 focus:ring-indigo-500 font-medium`}
-                      >
-                        {warehouses.length <= 1 && (
-                          <option value="">-- Choose or Add Destination Store --</option>
-                        )}
-                        {warehouses.map(w => (
-                          <option key={w.id} value={w.id} disabled={String(w.id) === String(formData.fromWarehouseId)}>
-                            {w.name} {String(w.id) === String(formData.fromWarehouseId) ? '(Same Source)' : ''}
-                          </option>
-                        ))}
-                        <option value="__add_new__" className="font-bold text-indigo-600">+ Add New Store / Warehouse...</option>
-                      </select>
+                        options={[
+                          ...(warehouses.length <= 1 ? [{ value: '', label: '-- Choose or Add Destination Store --' }] : []),
+                          ...warehouses.map(w => ({
+                            value: w.id,
+                            label: `${w.name} ${String(w.id) === String(formData.fromWarehouseId) ? '(Same Source)' : ''}`,
+                            disabled: String(w.id) === String(formData.fromWarehouseId)
+                          })),
+                          { value: '__add_new__', label: '+ Add New Store / Warehouse...' }
+                        ]}
+                      />
                       {formErrors.toWarehouseId && (
                         <p className="text-[11px] text-red-500 mt-1">{formErrors.toWarehouseId}</p>
                       )}
@@ -779,23 +776,20 @@ const StockTransfer = ({ onStockChanged }) => {
                 <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                   Select Product <span className="text-red-500">*</span>
                 </label>
-                <select
+                <CustomSelect
                   value={formData.productId}
-                  onChange={handleProductChange}
-                  className={`w-full px-3 py-2.5 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border ${
-                    formErrors.productId ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
-                  } focus:ring-2 focus:ring-indigo-500`}
-                >
-                  <option value="">-- Choose Product from Catalogue --</option>
-                  {productsList.map(p => {
-                    const whStock = p.stockByWarehouse ? (p.stockByWarehouse[`${p.id}_${formData.fromWarehouseId}`] || 0) : Number(p.currentStock || 0);
-                    return (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.barcode || p.sku || 'No Barcode'}) - Src Stock: {whStock} {p.unit || 'Pcs'}
-                      </option>
-                    );
-                  })}
-                </select>
+                  onChange={(val) => handleProductChange({ target: { value: val } })}
+                  options={[
+                    { value: '', label: '-- Choose Product from Catalogue --' },
+                    ...productsList.map(p => {
+                      const whStock = p.stockByWarehouse ? (p.stockByWarehouse[`${p.id}_${formData.fromWarehouseId}`] || 0) : Number(p.currentStock || 0);
+                      return {
+                        value: p.id,
+                        label: `${p.name} (${p.barcode || p.sku || 'No Barcode'}) - Src Stock: ${whStock} ${p.unit || 'Pcs'}`
+                      };
+                    })
+                  ]}
+                />
                 {formErrors.productId && <p className="text-[11px] text-red-500 mt-1">{formErrors.productId}</p>}
               </div>
 
@@ -806,18 +800,17 @@ const StockTransfer = ({ onStockChanged }) => {
                     <span>Batch / Lot Selection (FIFO)</span>
                     {loadingBatches && <span className="text-[10px] text-indigo-500 animate-pulse">Loading batches...</span>}
                   </label>
-                  <select
+                  <CustomSelect
                     value={formData.batchId}
-                    onChange={handleBatchChange}
-                    className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">-- All Batches (Auto FIFO Deduction) --</option>
-                    {availableBatches.map(b => (
-                      <option key={b.id} value={b.id}>
-                        Batch: {b.batch_number || 'DEFAULT'} | Rem: {b.remaining_quantity} | Cost: ₹{b.purchase_price || formData.purchasePrice} | Exp: {b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : 'N/A'}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => handleBatchChange({ target: { value: val } })}
+                    options={[
+                      { value: '', label: '-- All Batches (Auto FIFO Deduction) --' },
+                      ...availableBatches.map(b => ({
+                        value: b.id,
+                        label: `Batch: ${b.batch_number || 'DEFAULT'} | Rem: ${b.remaining_quantity} | Cost: ₹${b.purchase_price || formData.purchasePrice} | Exp: ${b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : 'N/A'}`
+                      }))
+                    ]}
+                  />
                   {formData.batchAvailableStock !== null && (
                     <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
                       ✓ Selected Batch Remaining Stock: <strong>{formData.batchAvailableStock} {formData.unit}</strong>
@@ -943,30 +936,33 @@ const StockTransfer = ({ onStockChanged }) => {
               </div>
 
               <div>
-                <select
+                <CustomSelect
                   value={selectedStatusFilter}
-                  onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-gray-600"
-                >
-                  <option value="All">All Statuses</option>
-                  <option value="In Transit">In Transit</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
+                  onChange={setSelectedStatusFilter}
+                  color="blue"
+                  options={[
+                    { value: 'All', label: 'All Statuses' },
+                    { value: 'In Transit', label: 'In Transit' },
+                    { value: 'Completed', label: 'Completed' },
+                    { value: 'Draft', label: 'Draft' },
+                    { value: 'Cancelled', label: 'Cancelled' }
+                  ]}
+                />
               </div>
 
               <div>
-                <select
+                <CustomSelect
                   value={selectedFromWhFilter}
-                  onChange={(e) => setSelectedFromWhFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-gray-600"
-                >
-                  <option value="All">All Source Warehouses</option>
-                  {warehouses.map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedFromWhFilter}
+                  color="blue"
+                  options={[
+                    { value: 'All', label: 'All Source Warehouses' },
+                    ...warehouses.map(w => ({
+                      value: w.id,
+                      label: w.name
+                    }))
+                  ]}
+                />
               </div>
             </div>
 
