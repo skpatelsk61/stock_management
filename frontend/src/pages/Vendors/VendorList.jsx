@@ -762,7 +762,7 @@ const VendorList = ({ defaultView = 'list' }) => {
       ) : viewMode === 'list' ? (
         <>
           {/* HEADER LIST VIEW */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 rounded-2xl shadow-sm">
             <div>
               <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                 <span className="p-1.5 bg-[#1B6E4C] rounded-lg text-white">🚚</span>
@@ -773,28 +773,28 @@ const VendorList = ({ defaultView = 'list' }) => {
               </p>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0">
               <button
                 onClick={() => handleOpenPurchaseReturnModal()}
-                className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 dark:bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs cursor-pointer"
+                className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-amber-600 dark:bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-500 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
               >
                 <ArrowPathIcon className="w-4 h-4 stroke-[2.5]" />
-                Purchase & Stock Returns
+                <span>Purchase & Stock Returns</span>
               </button>
               {!isReadOnly && (
                 <button
                   onClick={handleAddVendor}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs cursor-pointer"
+                  className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
                 >
                   <PlusIcon className="w-4 h-4 stroke-[2.5]" />
-                  Add Supplier Partner
+                  <span>Add Supplier Partner</span>
                 </button>
               )}
             </div>
           </div>
 
           {/* SUMMARY KPIS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
             <StatsCard
               loading={loading}
               title="Total Active Suppliers"
@@ -1082,38 +1082,38 @@ const VendorList = ({ defaultView = 'list' }) => {
           </div>
 
           {/* Supplier Financial Header Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Gross Purchases</span>
-              <p className="text-lg font-black text-slate-900 dark:text-white mt-1 tabular-nums">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block truncate">Gross Purchases</span>
+              <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 tabular-nums whitespace-nowrap truncate">
                 ₹{Number(ledgerData?.summary?.total_purchases || currentVendorObj?.total_purchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
 
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Purchase Returns</span>
-              <p className="text-lg font-black text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
+              <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider block truncate">Purchase Returns</span>
+              <p className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400 mt-1 tabular-nums whitespace-nowrap truncate">
                 ₹{Number(ledgerData?.summary?.total_returns || currentVendorObj?.total_returns || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
 
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Net Purchases</span>
-              <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1 tabular-nums">
+              <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block truncate">Net Purchases</span>
+              <p className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1 tabular-nums whitespace-nowrap truncate">
                 ₹{Number(ledgerData?.summary?.net_purchases || (Number(ledgerData?.summary?.total_purchases || 0) - Number(ledgerData?.summary?.total_returns || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
 
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Total Amount Paid</span>
-              <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block truncate">Total Amount Paid</span>
+              <p className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums whitespace-nowrap truncate">
                 ₹{Number(ledgerData?.summary?.total_paid || currentVendorObj?.total_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
             </div>
 
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Outstanding / Advance</span>
-              <p className={`text-lg font-black mt-1 tabular-nums ${
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block truncate">Outstanding / Advance</span>
+              <p className={`text-base sm:text-lg font-black mt-1 tabular-nums whitespace-nowrap truncate ${
                 (ledgerData?.summary?.advance_balance || currentVendorObj?.advance_balance || 0) > 0 
                   ? 'text-blue-600 dark:text-blue-400' 
                   : (ledgerData?.summary?.outstanding_balance || currentVendorObj?.outstanding_balance || 0) > 0 

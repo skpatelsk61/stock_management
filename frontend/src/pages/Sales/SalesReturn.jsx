@@ -142,11 +142,11 @@ const SalesReturn = () => {
 
   useEffect(() => {
     if (returnType === 'Exchange' && productsList.length === 0) {
-      fetchProducts();
+      loadExchangeProducts();
     }
   }, [returnType]);
 
-  const fetchProducts = async () => {
+  const loadExchangeProducts = async () => {
     try {
       const res = await productsAPI.getAll();
       if (res && res.success) {
@@ -227,8 +227,8 @@ const SalesReturn = () => {
   };
 
   const handleQtyChange = (lineKey, qty) => {
-    const max = selectedItems[lineKey]?.maxQty || 0;
-    const parsedQty = Math.max(0, Math.min(max, Number(qty) || 0));
+    const max = Number(selectedItems[lineKey]?.maxQty) || 0;
+    const parsedQty = qty === '' ? '' : Math.max(0, Math.min(max, Number(qty) || 0));
     setSelectedItems(prev => ({
       ...prev,
       [lineKey]: {
@@ -271,22 +271,36 @@ const SalesReturn = () => {
       return;
     }
 
-    // Validate at least one item is checked and has valid return quantity
+    // Validate at least one item is checked
     const checkedKeys = Object.keys(selectedItems).filter(
-      k => selectedItems[k].checked && selectedItems[k].returnQty > 0 && selectedItems[k].maxQty > 0
+      k => selectedItems[k].checked
     );
     if (checkedKeys.length === 0) {
-      dispatch(showToast({ msg: 'Please select at least one eligible item with available return quantity > 0', type: 'error' }));
+      dispatch(showToast({ msg: 'Please select at least one item to return', type: 'error' }));
       return;
+    }
+
+    // Comprehensive validation for all checked items
+    for (const key of checkedKeys) {
+      const it = selectedItems[key];
+      const rQty = Number(it.returnQty) || 0;
+      const mQty = Number(it.maxQty) || 0;
+      if (mQty <= 0) {
+        dispatch(showToast({ msg: `"${it.productName}" has already been completely returned (0 remaining eligible).`, type: 'error' }));
+        return;
+      }
+      if (rQty <= 0) {
+        dispatch(showToast({ msg: `Please enter a valid return quantity (> 0) for "${it.productName}".`, type: 'error' }));
+        return;
+      }
+      if (rQty > mQty) {
+        dispatch(showToast({ msg: `Return quantity (${rQty}) cannot exceed remaining sold quantity (${mQty}) for "${it.productName}".`, type: 'error' }));
+        return;
+      }
     }
 
     const firstKey = checkedKeys[0];
     const firstItem = selectedItems[firstKey];
-
-    if (firstItem.returnQty > firstItem.maxQty || firstItem.returnQty <= 0) {
-      dispatch(showToast({ msg: `Return quantity (${firstItem.returnQty}) must be between 1 and remaining sold quantity (${firstItem.maxQty})`, type: 'error' }));
-      return;
-    }
 
     const returnItemsList = checkedKeys.map(k => ({
       sale_item_id: selectedItems[k].sale_item_id,
@@ -325,15 +339,19 @@ const SalesReturn = () => {
         dispatch(showToast({ msg: res.message || `Sales Return Voucher ${res.returnNo} processed successfully!`, type: 'success' }));
         
         // Refresh all global Redux slices immediately across ERP
-        dispatch(fetchCustomers());
-        dispatch(fetchStockSummary());
-        dispatch(fetchStockAlerts());
-        dispatch(fetchProducts());
-        dispatch(fetchInventorySummary());
-        dispatch(fetchSales());
-        // Notify Dashboard that sales/returns data changed
-        window.dispatchEvent(new CustomEvent('sales-updated'));
-        window.dispatchEvent(new CustomEvent('inventory-updated'));
+        try {
+          dispatch(fetchCustomers());
+          dispatch(fetchStockSummary());
+          dispatch(fetchStockAlerts());
+          dispatch(fetchProducts());
+          dispatch(fetchInventorySummary());
+          dispatch(fetchSales());
+          // Notify Dashboard that sales/returns data changed
+          window.dispatchEvent(new CustomEvent('sales-updated'));
+          window.dispatchEvent(new CustomEvent('inventory-updated'));
+        } catch (syncErr) {
+          console.warn('Background sync notice:', syncErr);
+        }
 
         // Fetch full return voucher details to display print modal
         if (res.returnId) {
@@ -352,7 +370,18 @@ const SalesReturn = () => {
         setPendingPayload(null);
       }
     } catch (err) {
-      dispatch(showToast({ msg: err.response?.data?.message || 'Failed to process sales return', type: 'error' }));
+      const errMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to process sales return';
+      dispatch(showToast({ msg: errMsg, type: 'error' }));
+      // Auto refresh invoice data to keep remaining return units synchronized
+      if (searchQuery.trim() && selectedInvoice) {
+        try {
+          const sRes = await salesReturnsAPI.searchInvoice(searchQuery.trim());
+          if (sRes?.success && sRes.invoices) {
+            const current = sRes.invoices.find(inv => inv.sale_id === selectedInvoice.sale_id);
+            if (current) selectInvoice(current);
+          }
+        } catch (e) {}
+      }
     } finally {
       setSubmitting(false);
     }
@@ -425,10 +454,14 @@ const SalesReturn = () => {
           dispatch(showToast({ msg: res.message || `Return Voucher ${returnNo} voided successfully!`, type: 'success' }));
           fetchHistory();
           // Refresh global Redux slices
-          dispatch(fetchCustomers());
-          dispatch(fetchStockSummary());
-          dispatch(fetchProducts());
-          dispatch(fetchSales());
+          try {
+            dispatch(fetchCustomers());
+            dispatch(fetchStockSummary());
+            dispatch(fetchProducts());
+            dispatch(fetchSales());
+          } catch (syncErr) {
+            console.warn('Background sync notice:', syncErr);
+          }
         } else {
           dispatch(showToast({ msg: res?.message || 'Voiding return voucher failed', type: 'error' }));
         }
@@ -439,27 +472,27 @@ const SalesReturn = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 select-none font-sans bg-slate-50 dark:bg-slate-950 min-h-screen">
+    <div className="p-3 sm:p-4 md:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6 select-none font-sans bg-slate-50 dark:bg-slate-950 min-h-screen">
       
       {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xs">
         <div>
-          <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <div className="p-2 bg-emerald-600 rounded-xl text-white shadow-md">
-              <ArrowPathIcon className="w-6 h-6 stroke-[2.5]" />
+          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2 sm:gap-2.5">
+            <div className="p-1.5 sm:p-2 bg-emerald-600 rounded-xl text-white shadow-md">
+              <ArrowPathIcon className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
             </div>
             Customer Sales Return Management
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-semibold mt-1">
             Process returns, adjust Udhaar balances, manage exchanges, and keep inventory & customer ledgers synchronized.
           </p>
         </div>
 
         {/* TOP TAB SWITCHER */}
-        <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 self-start md:self-auto">
+        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 sm:p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 w-full sm:w-auto overflow-x-auto">
           <button
             onClick={() => setActiveTab('process')}
-            className={`px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${
               activeTab === 'process'
                 ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-slate-200 dark:border-slate-800'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -469,7 +502,7 @@ const SalesReturn = () => {
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-slate-200 dark:border-slate-800'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -485,7 +518,7 @@ const SalesReturn = () => {
         <div className="space-y-6">
           
           {/* STEP 1: INVOICE SEARCH BAR */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xs space-y-3 sm:space-y-4">
             <h2 className="text-xs font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">
               Step 1: Search Original Sales Invoice
             </h2>
@@ -503,7 +536,7 @@ const SalesReturn = () => {
               <button
                 type="submit"
                 disabled={searching}
-                className="px-6 py-2.5 bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50 text-center"
               >
                 {searching ? 'Searching Invoice...' : 'Find Invoice'}
               </button>
@@ -551,7 +584,7 @@ const SalesReturn = () => {
             >
               
               {/* INVOICE HEADER AUTO SUMMARY */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xs space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <h2 className="text-xs font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                     Step 2: Selected Invoice Specs & Customer Classification
@@ -566,7 +599,7 @@ const SalesReturn = () => {
                 </div>
 
                 {/* 3-DAY RETURN POLICY STATUS BANNER */}
-                <div className={`p-4 rounded-xl border flex items-start sm:items-center gap-3 text-xs font-bold ${
+                <div className={`p-3.5 sm:p-4 rounded-xl border flex items-start sm:items-center gap-3 text-xs font-bold ${
                   selectedInvoice.is_policy_eligible !== false
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
                     : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
@@ -580,30 +613,30 @@ const SalesReturn = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4 text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <div className="bg-slate-50 dark:bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 break-words">
                     <span className="text-[10px] font-black text-slate-400 uppercase block">Invoice Number</span>
                     <span className="text-sm font-black text-slate-900 dark:text-white">{selectedInvoice.invoice_no}</span>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <div className="bg-slate-50 dark:bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 break-words">
                     <span className="text-[10px] font-black text-slate-400 uppercase block">Customer & Type</span>
-                    <span className="text-sm font-black text-slate-900 dark:text-white">{selectedInvoice.customer_name}</span>
+                    <span className="text-sm font-black text-slate-900 dark:text-white truncate block">{selectedInvoice.customer_name}</span>
                     <span className={`mt-1 inline-block px-2 py-0.5 rounded text-[9px] font-black ${isBorrowInvoice ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
-                      {isBorrowInvoice ? 'Borrow (Udhaar Customer)' : 'Paid / Walk-in Customer'}
+                      {isBorrowInvoice ? 'Borrow Customer' : 'Paid / Walk-in'}
                     </span>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                    <span className="text-[10px] font-black text-slate-400 uppercase block">Invoice Total / Paid</span>
+                  <div className="bg-slate-50 dark:bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 break-words">
+                    <span className="text-[10px] font-black text-slate-400 uppercase block">Total / Paid</span>
                     <span className="text-sm font-black text-slate-900 dark:text-white">₹{Number(selectedInvoice.grand_total).toLocaleString('en-IN')}</span>
                     <span className="text-[10px] text-emerald-600 font-bold block">Paid: ₹{Number(selectedInvoice.amount_paid).toLocaleString('en-IN')}</span>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <div className="bg-slate-50 dark:bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 break-words">
                     <span className="text-[10px] font-black text-slate-400 uppercase block">Current Invoice Due</span>
                     <span className={`text-sm font-black ${currentInvoiceDue > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600'}`}>
                       ₹{currentInvoiceDue.toLocaleString('en-IN')}
                     </span>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <div className="col-span-2 sm:col-span-1 bg-slate-50 dark:bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 break-words">
                     <span className="text-[10px] font-black text-slate-400 uppercase block">Total Udhaar Balance</span>
                     <span className="text-sm font-black text-rose-600 dark:text-rose-400">
                       ₹{Number(selectedInvoice.customer_outstanding_balance || 0).toLocaleString('en-IN')}
@@ -617,7 +650,7 @@ const SalesReturn = () => {
                     Select Item(s) to Return:
                   </h3>
                   <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
-                    <table className="w-full text-left text-xs font-semibold">
+                    <table className="w-full min-w-[660px] text-left text-xs font-semibold">
                       <thead>
                         <tr className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
                           <th className="p-3 w-10 text-center">Select</th>
@@ -671,12 +704,13 @@ const SalesReturn = () => {
                               <td className="p-3">
                                 <input
                                   type="number"
+                                  step="any"
                                   min={0}
                                   max={item.remaining_qty}
                                   disabled={!isChecked || !isEligible}
                                   value={returnQty}
                                   onChange={(e) => handleQtyChange(lineKey, e.target.value)}
-                                  className="w-20 px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white disabled:opacity-40 focus:outline-none focus:border-emerald-600"
+                                  className="w-20 sm:w-24 px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white disabled:opacity-40 focus:outline-none focus:border-emerald-600"
                                 />
                               </td>
                               <td className="p-3 text-right font-black text-slate-900 dark:text-white">
@@ -692,9 +726,9 @@ const SalesReturn = () => {
               </div>
 
               {/* STEP 3: RETURN TYPE, REASON & REFUND METRICS */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xs space-y-4 sm:space-y-6">
                 <h2 className="text-xs font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3">
-                  Step 3: ERP Business Logic & Settlement Settlement
+                  Step 3: ERP Business Logic & Settlement
                 </h2>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -839,7 +873,7 @@ const SalesReturn = () => {
                   <button
                     type="submit"
                     disabled={submitting || totalCalculatedRefund <= 0}
-                    className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-40"
+                    className="w-full sm:w-auto px-8 py-3 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-40 text-center"
                   >
                     {submitting ? 'Processing Return...' : `Confirm & Complete Return Voucher`}
                   </button>
@@ -853,8 +887,8 @@ const SalesReturn = () => {
 
       {/* TAB 2: RETURN LOGS & HISTORY */}
       {activeTab === 'history' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xs space-y-4 sm:space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div>
               <h2 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
                 Sales Return History Logs
@@ -866,7 +900,7 @@ const SalesReturn = () => {
           </div>
 
           <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
-            <table className="w-full text-left text-xs font-semibold">
+            <table className="w-full min-w-[760px] text-left text-xs font-semibold">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <th className="p-3">Voucher #</th>
