@@ -16,6 +16,7 @@ import { updateProfile } from '../../store/slices/profileSlice';
 import { showToast } from '../../store/slices/notificationSlice';
 import { useStoreLogo, getLogoUrl, setStoreLogo } from '../../utils/logoHelper';
 import { validateEmailField } from '../../utils/validators';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const Settings = () => {
   const dispatch = useAppDispatch();
@@ -633,16 +634,18 @@ const Settings = () => {
                 <ShieldCheckIcon className="w-5 h-5 text-indigo-500" /> Module Access RBAC Control Matrix
               </h2>
               <div className="flex gap-4 items-center mb-4">
-                <label className="text-xs font-bold text-slate-700 uppercase">Select Role Profile:</label>
-                <select
-                  value={selectedRoleId}
-                  onChange={(e) => setSelectedRoleId(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs bg-slate-50 font-bold"
-                >
-                  {rolesList.map(r => (
-                    <option key={r.id} value={r.id} disabled={r.id === 1}>{r.name} {r.id === 1 ? '(Full privileges fixed)' : ''}</option>
-                  ))}
-                </select>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">Select Role Profile:</label>
+                <div className="w-64">
+                  <CustomSelect
+                    value={selectedRoleId}
+                    onChange={(val) => setSelectedRoleId(val)}
+                    color="blue"
+                    options={rolesList.map(r => ({
+                      value: r.id,
+                      label: `${r.name}${r.id === 1 ? ' (Full privileges fixed)' : ''}`
+                    }))}
+                  />
+                </div>
               </div>
 
               <div className="border border-slate-100 rounded-2xl overflow-hidden">
@@ -781,15 +784,16 @@ const Settings = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Role Permission profile</label>
-            <select
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">Role Permission profile</label>
+            <CustomSelect
               value={userForm.role_id}
-              onChange={(e) => setUserForm(prev => ({ ...prev, role_id: e.target.value }))}
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-500 font-bold"
-            >
-              <option value="2">Manager (Operational control)</option>
-              <option value="3">Staff (Cashier checkout only)</option>
-            </select>
+              onChange={(val) => setUserForm(prev => ({ ...prev, role_id: val }))}
+              color="blue"
+              options={[
+                { value: '2', label: 'Manager (Operational control)' },
+                { value: '3', label: 'Staff (Cashier checkout only)' }
+              ]}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
             <button

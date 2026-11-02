@@ -22,6 +22,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { toggleTheme } from '../../store/slices/themeSlice';
 import Loader from '../../components/common/Loader';
 import ThemeToggle from '../../components/common/ThemeToggle';
+import CustomSelect from '../../components/common/CustomSelect';
 import { validateEmailField } from '../../utils/validators';
 
 const StoreManagement = () => {
@@ -672,23 +673,24 @@ const StoreManagement = () => {
                       
                       {/* Action Option 1 */}
                       <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-xl justify-between">
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase">Select plan mapping</p>
-                          <select 
+                        <div className="flex-1 min-w-0 pr-2">
+                          <p className="text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase mb-1">Select plan mapping</p>
+                          <CustomSelect 
                             value={subActionPlan}
-                            onChange={(e) => setSubActionPlan(e.target.value)}
-                            className="bg-transparent text-xs font-bold border-none outline-none mt-1"
-                          >
-                            <option value="Monthly">Monthly Plan (₹800)</option>
-                            <option value="Quarterly">Quarterly Plan (₹2100)</option>
-                            <option value="Half-Yearly">Half-Yearly Plan (₹3600)</option>
-                            <option value="Yearly">Yearly Plan (₹6000)</option>
-                          </select>
+                            onChange={(val) => setSubActionPlan(val)}
+                            color="blue"
+                            options={[
+                              { value: 'Monthly', label: 'Monthly Plan (₹800)' },
+                              { value: 'Quarterly', label: 'Quarterly Plan (₹2100)' },
+                              { value: 'Half-Yearly', label: 'Half-Yearly Plan (₹3600)' },
+                              { value: 'Yearly', label: 'Yearly Plan (₹6000)' },
+                            ]}
+                          />
                         </div>
                         <button
                           disabled={subSubmitting}
                           onClick={() => handleSubscriptionOverride('activate')}
-                          className="px-3.5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40"
+                          className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40 shrink-0 cursor-pointer shadow-xs self-end mb-0.5"
                         >
                           Activate/Renew
                         </button>

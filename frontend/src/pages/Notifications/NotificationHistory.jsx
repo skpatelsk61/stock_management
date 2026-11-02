@@ -502,18 +502,19 @@ const NotificationHistory = () => {
           <form onSubmit={handleSaveSettings} className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-xs flex items-center gap-3 self-start md:self-auto">
             <div className="flex items-center gap-2">
               <Cog8ToothIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400 stroke-[2]" />
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block leading-tight">Retention Policy</span>
-                <select
+              <div className="min-w-[210px]">
+                <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block leading-tight mb-1">Retention Policy</span>
+                <CustomSelect
                   value={archiveDays}
-                  onChange={(e) => setArchiveDays(Number(e.target.value))}
-                  className="text-xs font-bold text-slate-900 dark:text-slate-200 bg-transparent focus:outline-none cursor-pointer"
-                >
-                  <option value={7} className="bg-white dark:bg-slate-900">Auto-delete older than 7 Days</option>
-                  <option value={15} className="bg-white dark:bg-slate-900">Auto-delete older than 15 Days</option>
-                  <option value={30} className="bg-white dark:bg-slate-900">Auto-delete older than 30 Days</option>
-                  <option value={90} className="bg-white dark:bg-slate-900">Auto-delete older than 90 Days</option>
-                </select>
+                  onChange={(val) => setArchiveDays(Number(val))}
+                  color="blue"
+                  options={[
+                    { value: 7, label: 'Auto-delete older than 7 Days' },
+                    { value: 15, label: 'Auto-delete older than 15 Days' },
+                    { value: 30, label: 'Auto-delete older than 30 Days' },
+                    { value: 90, label: 'Auto-delete older than 90 Days' }
+                  ]}
+                />
               </div>
             </div>
             <button

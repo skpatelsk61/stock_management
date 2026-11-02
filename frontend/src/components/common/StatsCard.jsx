@@ -36,13 +36,13 @@ const StatsCard = ({
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex items-center justify-between animate-pulse w-full">
-        <div className="space-y-3 flex-1">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs flex items-center justify-between animate-pulse w-full">
+        <div className="space-y-3 flex-1 min-w-0">
           <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2" />
           <div className="h-6 bg-slate-200 dark:bg-slate-800 rounded w-3/4" />
           <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-2/3" />
         </div>
-        <div className="h-10 w-10 rounded-lg bg-slate-200 dark:bg-slate-800 ml-4 flex-shrink-0" />
+        <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-slate-200 dark:bg-slate-800 ml-3 flex-shrink-0" />
       </div>
     );
   }
@@ -53,15 +53,21 @@ const StatsCard = ({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
       onClick={onClick}
-      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs select-none transition-all duration-200 w-full relative overflow-hidden flex items-center justify-between group ${
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs select-none transition-all duration-200 w-full relative overflow-hidden flex items-center justify-between group ${
         onClick ? 'cursor-pointer hover:border-slate-300 dark:hover:border-slate-700' : ''
       }`}
     >
       <div className="flex-1 min-w-0 pr-2">
-        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase tracking-wider leading-tight">
+        <p
+          className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs font-semibold uppercase tracking-wider leading-tight truncate"
+          title={typeof title === 'string' ? title : undefined}
+        >
           {title}
         </p>
-        <h3 className="text-xl font-extrabold text-slate-900 dark:text-white mt-1 tracking-tight tabular-nums break-words">
+        <h3
+          className="text-base sm:text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-1 tracking-tight tabular-nums whitespace-nowrap truncate"
+          title={typeof value === 'string' || typeof value === 'number' ? String(value) : undefined}
+        >
           {value}
         </h3>
         
@@ -94,13 +100,13 @@ const StatsCard = ({
 
       {Icon && (
         <div
-          className={`h-10 w-10 rounded-lg flex items-center justify-center border flex-shrink-0 ml-3 transition-transform group-hover:scale-105 ${selectedIconTheme.bg}`}
+          className={`h-9 w-9 sm:h-10 sm:w-10 rounded-lg flex items-center justify-center border flex-shrink-0 ml-2.5 sm:ml-3 transition-transform group-hover:scale-105 ${selectedIconTheme.bg}`}
         >
-          <Icon className="w-5 h-5" />
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
         </div>
       )}
     </motion.div>
   );
 };
 
-export default StatsCard;
+export default StatsCard;
