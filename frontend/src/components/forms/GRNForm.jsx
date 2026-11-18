@@ -262,7 +262,7 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
       date: formData.date,
       notes: finalNotes,
       auto_create_invoice: true,
-      finalize_po: deliveryStatusInfo.isFullStockArrived,
+      finalize_po: false,
       include_damaged_payment: includeDamagedPayment,
       include_missing_payment: includeMissingPayment,
       items: formData.items.map((item) => {
@@ -882,13 +882,13 @@ const GRNForm = ({ purchaseOrder, onSubmit, onCancel }) => {
                         Full Stock Arrived (100% Fulfilled)
                       </span>
                       <span className="text-[10px] text-emerald-300 block">
-                        All ordered units received without shortage. Purchase Order will automatically transition to <strong>Completed</strong>.
+                        All ordered units inwarded into inventory. Click the ₹ (Invoice) button on the order list to record invoice and complete the order.
                       </span>
                     </div>
                   </div>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white rounded-lg shadow-xs">
-                    <LockClosedIcon className="w-3.5 h-3.5" />
-                    Auto-Complete PO
+                    <LockOpenIcon className="w-3.5 h-3.5" />
+                    Awaiting Invoice (₹)
                   </span>
                 </div>
               ) : (

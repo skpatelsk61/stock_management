@@ -180,6 +180,7 @@ const PurchaseOrderList = () => {
         delivery_status: data.deliveryStatus || 'Received',
         payment_method: data.paymentMode || 'Cash',
         purchase_order_id: selectedPO?.id || null,
+        finalize_po: data.finalize_po !== false,
         items: itemsMapped
       };
 
@@ -190,7 +191,7 @@ const PurchaseOrderList = () => {
             const targetStatus = data.finalize_po !== false ? 'Completed' : 'Partially Pending';
             await purchaseOrdersAPI.updateStatus(selectedPO.id, {
               status: targetStatus,
-              force: data.finalize_po === true
+              force: true
             });
           } catch (statusErr) {
             console.warn('PO status update notice:', statusErr);
