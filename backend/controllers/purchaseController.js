@@ -1623,8 +1623,11 @@ export const createPurchase = async (req, res, next) => {
 
     // Auto-sync purchase order status if linked to a purchase order
     if (purchase_order_id) {
-      if (req.body.finalize_po) {
-        await connection.query('UPDATE purchase_orders SET status = "Completed" WHERE id = ?', [purchase_order_id]);
+      if (req.body.finalize_po !== false) {
+        await connection.query(
+          'UPDATE purchase_orders SET status = "Completed", total = COALESCE(NULLIF(?, 0), total), subtotal = COALESCE(NULLIF(?, 0), subtotal), gst_amount = COALESCE(NULLIF(?, 0), gst_amount) WHERE id = ?',
+          [invoiceTotal, invoiceSubtotal, Number(gst_amount || 0), purchase_order_id]
+        );
       } else {
         const [updatedPOItems] = await connection.query(
           'SELECT quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
@@ -1632,7 +1635,7 @@ export const createPurchase = async (req, res, next) => {
         );
         const allReceived = updatedPOItems.length > 0 && updatedPOItems.every(it => Number(it.received_quantity || 0) >= Number(it.quantity || 0));
         const anyReceived = updatedPOItems.some(it => Number(it.received_quantity || 0) > 0);
-        const autoStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
+        const autoStatus = allReceived ? 'Partially Pending' : (anyReceived ? 'Partially Pending' : 'Pending');
         await connection.query('UPDATE purchase_orders SET status = ? WHERE id = ?', [autoStatus, purchase_order_id]);
       }
     }
@@ -2438,24 +2441,27 @@ export const updatePurchaseOrderStatus = async (req, res, next) => {
     }
 
     if (status === 'Completed' && !force) {
-      const [poItems] = await req.db.query(
-        'SELECT quantity, delivered_quantity, received_quantity, damaged_quantity, rejected_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
-        [id]
-      );
-      const hasIncompleteItems = poItems.some(it => {
-        const ord = Number(it.quantity || 0);
-        const rec = Number(it.received_quantity || 0);
-        // Only 100% net accepted good inventory completes the order. Missing or damaged goods keep it in Partially Pending.
-        return rec < ord;
-      });
-      if (hasIncompleteItems) {
-        await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', ['Partially Pending', id]);
-        await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Purchase Order "${po[0].purchase_order_no}" status updated to "Partially Pending" (partial goods received)`, req.ip);
-        return res.status(200).json({
-          success: true,
-          status: 'Partially Pending',
-          message: 'Purchase Order status set to "Partially Pending" because full accepted stock has not arrived yet.'
+      const [poPurch] = await req.db.query('SELECT id FROM purchases WHERE purchase_order_id = ? AND payment_status != "Void" LIMIT 1', [id]);
+      if (poPurch.length === 0) {
+        const [poItems] = await req.db.query(
+          'SELECT quantity, delivered_quantity, received_quantity, damaged_quantity, rejected_quantity FROM purchase_order_items WHERE purchase_order_id = ?',
+          [id]
+        );
+        const hasIncompleteItems = poItems.some(it => {
+          const ord = Number(it.quantity || 0);
+          const rec = Number(it.received_quantity || 0);
+          // Only 100% net accepted good inventory completes the order. Missing or damaged goods keep it in Partially Pending.
+          return rec < ord;
         });
+        if (hasIncompleteItems) {
+          await req.db.query('UPDATE purchase_orders SET status = ? WHERE id = ?', ['Partially Pending', id]);
+          await logActivity(req.user.id, 'Update PO Status', 'Purchases', `Purchase Order "${po[0].purchase_order_no}" status updated to "Partially Pending" (partial goods received)`, req.ip);
+          return res.status(200).json({
+            success: true,
+            status: 'Partially Pending',
+            message: 'Purchase Order status set to "Partially Pending" because full accepted stock has not arrived yet.'
+          });
+        }
       }
     }
 
@@ -2947,9 +2953,9 @@ export const createGRN = async (req, res, next) => {
       }
     }
 
-    // A Purchase Order completes immediately once 100% full good stock has arrived for all items!
-    // If any item is missing/damaged/short, it remains in 'Partially Pending' status until full stock arrives.
-    const newPOStatus = allReceived ? 'Completed' : (anyReceived ? 'Partially Pending' : 'Pending');
+    // A Purchase Order completes ONLY when the user records the invoice via the Rupee (₹) action!
+    // GRN inwards stock and leaves PO in 'Partially Pending' awaiting Invoice / Billing entry.
+    const newPOStatus = 'Partially Pending';
 
     // Recalculate and update PO real-time total amounts from linked purchases / GRNs
     const [poPurchTotals] = await connection.query(
@@ -2993,9 +2999,7 @@ export const createGRN = async (req, res, next) => {
     await connection.commit();
     await logActivity(req.user.id, 'Create GRN', 'Purchases', `Created Goods Received Note "${grnNo}" for PO "${purchase_order_no}" (Status: ${newPOStatus}, Total: ₹${poTotal})`, req.ip, req.db);
 
-    const completionMsg = allReceived
-      ? 'Goods Received Note saved. Full stock received and Purchase Order completed.'
-      : 'Goods Received Note saved. Partial stock inwarded. Purchase Order remains open under "Partially Pending" for missing items.';
+    const completionMsg = 'Goods Received Note saved. Stock inwarded into inventory. Use the Invoice (₹) action to finalize billing and complete the purchase order.';
 
     return res.status(201).json({
       success: true,

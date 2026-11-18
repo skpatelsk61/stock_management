@@ -1081,7 +1081,7 @@ export const runCategorySchemaMigrations = async (pool) => {
         WHERE status = 'Partially Received'
       `);
 
-      // Reconcile any Completed POs where accepted good stock is strictly less than ordered quantity (damaged/missing items):
+      // Reconcile any Completed POs where accepted good stock is strictly less than ordered quantity and no purchase invoice was posted:
       await pool.query(`
         UPDATE purchase_orders po
         JOIN (
@@ -1091,10 +1091,21 @@ export const runCategorySchemaMigrations = async (pool) => {
           HAVING SUM(received_quantity) < SUM(quantity)
         ) short_pos ON po.id = short_pos.purchase_order_id
         SET po.status = 'Partially Pending'
-        WHERE po.status = 'Completed' AND (
+        WHERE po.status = 'Completed' AND NOT EXISTS (
+          SELECT 1 FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'
+        ) AND (
           SELECT COALESCE(SUM(delivered_quantity), 0) + COALESCE(SUM(damaged_quantity), 0) + COALESCE(SUM(received_quantity), 0)
           FROM purchase_order_items poi2 WHERE poi2.purchase_order_id = po.id
         ) > 0
+      `);
+
+      // Ensure Completed POs that have no purchase invoice are restored to Partially Pending so user can record invoice via the Rupee icon
+      await pool.query(`
+        UPDATE purchase_orders po
+        SET po.status = 'Partially Pending'
+        WHERE po.status = 'Completed' AND NOT EXISTS (
+          SELECT 1 FROM purchases p WHERE p.purchase_order_id = po.id AND p.payment_status != 'Void'
+        )
       `);
     } catch (e) {
       console.warn('[Schema Migration] purchase_orders reconciliation check:', e.message);
