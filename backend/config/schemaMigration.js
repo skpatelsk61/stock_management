@@ -155,6 +155,9 @@ export const runCategorySchemaMigrations = async (pool) => {
       if (!pbColNames.includes('selling_price')) {
         await pool.query('ALTER TABLE purchase_batches ADD COLUMN selling_price DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER mrp');
       }
+      try {
+        await pool.query('ALTER TABLE purchase_batches MODIFY COLUMN purchase_date DATE NOT NULL DEFAULT (CURRENT_DATE)');
+      } catch (dateErr) {}
     } catch (pbErr) {
       console.warn('[Schema Migration] purchase_batches columns check notice:', pbErr.message);
     }

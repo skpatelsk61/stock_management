@@ -366,8 +366,8 @@ export const createProduct = async (req, res, next) => {
     if (openingStockVal > 0) {
       const batchNum = `BATCH-INIT-${productId}`;
       await req.db.query(
-        `INSERT INTO purchase_batches (product_id, warehouse_id, batch_number, purchase_price, selling_price, mrp, purchase_quantity, remaining_quantity, expiry_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_batches (product_id, warehouse_id, batch_number, purchase_price, selling_price, mrp, purchase_quantity, remaining_quantity, purchase_date, expiry_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE(), ?)`,
         [productId, warehouseIdVal, batchNum, purchasePriceVal, sellingPriceVal, mrpVal, openingStockVal, openingStockVal, eDateVal]
       );
       await req.db.query(
@@ -763,8 +763,8 @@ export const bulkImportProducts = async (req, res, next) => {
       if (openingStockVal > 0) {
         const batchNum = `BATCH-INIT-${productId}`;
         await connection.query(
-          `INSERT INTO purchase_batches (product_id, warehouse_id, batch_number, purchase_price, selling_price, mrp, purchase_quantity, remaining_quantity, expiry_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO purchase_batches (product_id, warehouse_id, batch_number, purchase_price, selling_price, mrp, purchase_quantity, remaining_quantity, purchase_date, expiry_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE(), ?)`,
           [productId, warehouseId, batchNum, purchasePrice, sellingPrice, mrp, openingStockVal, openingStockVal, eDateVal]
         );
         await connection.query(

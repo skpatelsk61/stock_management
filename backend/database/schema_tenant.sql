@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS purchase_batches (
   batch_number VARCHAR(100) NULL,
   purchase_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000,
   remaining_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000,
-  purchase_date DATE NOT NULL,
+  purchase_date DATE NOT NULL DEFAULT (CURRENT_DATE),
   expiry_date DATE NULL,
   purchase_price DECIMAL(12,2) DEFAULT 0.00,
   mrp DECIMAL(12,2) NOT NULL DEFAULT 0.00,
